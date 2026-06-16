@@ -1,48 +1,136 @@
 # Newsletter Agent
 
-An AI-powered newsletter automation pipeline that ingests emails from Gmail, filters and summarizes them using Google Gemini, and delivers a formatted HTML digest back to a recipient.
+An end-to-end AI pipeline that reads your Gmail newsletters, selects the most relevant articles with an LLM, writes a personalized Hebrew digest, and delivers it to your inbox — fully automated, daily.
 
-## How It Works
+Built with LangGraph, Google Gemini 2.5, and a multi-criteria LLM-as-judge eval harness.
 
-The agent is built as a stateful graph using **LangGraph**. Each run flows through the following nodes:
+---
 
+## Demo
+
+| Top of digest | Full issue |
+|---|---|
+| ![Newsletter top](docs/demo_1.png) | ![Newsletter full](docs/demo_2.png) |
+
+---
+
+## Architecture
+
+The pipeline is a **stateful LangGraph graph** with a conditional retry loop. If the Gmail fetch returns no articles (label empty, API hiccup), the graph backs off and retries up to `max_tries` times before failing gracefully.
+
+```mermaid
+flowchart TD
+    START --> fetch
+
+    fetch -->|"list[Article]"| check{articles?}
+    check -->|"yes"| filter
+    check -->|"no & tries < max_tries"| expand_search
+    check -->|"no & tries == max_tries"| END
+
+    expand_search -->|"tries +1"| fetch
+
+    filter -->|"top_k articles"| summarize
+    summarize -->|"HTML + NewsletterData"| send_email
+    send_email -->|success / failed| END
 ```
-fetch → [check results] → filter → summarize → send_email
-              ↓
-        expand_search (retry if no articles found)
+
+### Node responsibilities
+
+| Node | What it does |
+|---|---|
+| `fetch` | Gmail API → decode MIME parts → `list[Article]` |
+| `expand_search` | increments retry counter (search broadening is a TODO) |
+| `filter` | Gemini scores all article titles by subject relevance, returns top-k names |
+| `summarize` | Gemini writes full newsletter JSON → rendered to HTML |
+| `send_email` | Gmail API sends the HTML digest |
+
+---
+
+## Newsletter structure
+
+Each digest is compiled into three sections by the LLM:
+
+- **עיקרי הגיליון** (Top stories) — articles scoring ≥ 6/10 relevance. Each card has:
+  - *השורה התחתונה* — 1–2 sentence factual summary, no fluff
+  - *איך זה פוגש אותך* — personalized angle connecting to the reader's stack (RAG, LangGraph, multi-agent)
+- **עוד כותרות בקצר** (Brief) — lower-relevance articles as one-liners
+- **המלצות לביצוע** (Actions) — 1–2 specific, executable recommendations grounded in today's articles
+
+The LLM is given a structured output schema (Pydantic → JSON) so the HTML renderer never touches raw prose.
+
+---
+
+## Eval harness
+
+`eval.py` runs the two LLM nodes against fixture data — **no Gmail required** — and produces a quality report.
+
+**Fixture set:** 6 AI-engineering articles + 2 deliberately off-topic (startup funding, health study) to test filter discrimination.
+
+### Structural checks (rule-based)
+
+| Check | What fails it |
+|---|---|
+| HTML parseable | BeautifulSoup parse error |
+| has header | `.header` class missing |
+| has full card | no `.card` element |
+| has brief section | no `.brief-section` element |
+| has actions section | no `.actions-section` element |
+| no `dir=ltr` elements | RTL layout broken |
+
+### LLM-as-judge scores (1–5 each)
+
+| Criterion | Rubric |
+|---|---|
+| **Faithfulness** | Every factual claim traceable to source articles; no hallucination |
+| **Hebrew quality** | Fluent prose; technical terms (RAG, LLM, API) kept in English |
+| **Personalization** | Advice is concrete and specific to the target audience's stack |
+| **Actionability** | 1–2 immediately executable actions tied to today's articles |
+
+Run it:
+
+```bash
+python eval.py
+# Results printed as a table and saved to logs/eval_<timestamp>.json
 ```
 
-1. **Fetch** — pulls emails from a configured Gmail label using the Gmail API
-2. **Filter** — uses Gemini to rank and select the top-k most relevant articles by subject
-3. **Summarize** — generates a professional, mobile-responsive Hebrew newsletter in HTML via Gemini
-4. **Send** — delivers the digest via Gmail to the configured recipient
+---
 
-## Tech Stack
+## Reliability
 
-- **Python**
-- **LangGraph** — stateful agent graph with conditional retry logic
-- **Google Gemini API** (`gemini-2.5-flash` / `gemini-2.5-pro`) — article ranking and newsletter generation
-- **Gmail API** — OAuth 2.0 authenticated email ingestion and delivery
-- **Pydantic** — data modeling
+Every Gemini call is wrapped in **tenacity** — 3 retries with exponential backoff (2 s → 4 s → 8 s). The full graph execution runs inside a **60-second asyncio timeout** so a hanging API call never blocks the daily run.
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Orchestration | LangGraph | Stateful graph with first-class conditional edges and checkpointing |
+| LLM | Gemini 2.5 Flash | Extended thinking budget for the summarize step; cost-effective for daily runs |
+| Email | Gmail API (OAuth 2.0) | Native read + send from an existing inbox, no extra infra |
+| Data modeling | Pydantic | Structured LLM output that fails loudly on schema violations |
+| Fault tolerance | tenacity + asyncio timeout | Handles transient LLM failures without manual intervention |
+
+---
 
 ## Setup
 
-### 1. Prerequisites
+### Prerequisites
 
 - Python 3.10+
-- A Google Cloud project with the Gmail API enabled
-- A `credentials.json` file from the Google Cloud Console (OAuth 2.0 Desktop App)
-- A Google Gemini API key
+- Google Cloud project with Gmail API enabled
+- `credentials.json` (OAuth 2.0 Desktop App) from the Cloud Console
+- Gemini API key
 
-### 2. Install dependencies
+### Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment variables
+### Configure
 
-Create a `.env` file in the project root:
+Create `.env` in the project root:
 
 ```env
 GOOGLE_API_KEY=your_gemini_api_key
@@ -60,31 +148,25 @@ RECIPIENT_EMAIL=recipient@example.com
 TOP_K=5
 ```
 
-### 4. Authenticate with Gmail
+### First run — Gmail auth
 
-On the first run the browser will open for OAuth consent. A `token.json` file is saved locally for subsequent runs.
-
-### 5. Run
+The first run opens a browser for OAuth consent and saves `token.json` for subsequent runs.
 
 ```bash
 python main.py
 ```
 
-## Reliability
+---
 
-Production fault tolerance is built into the pipeline:
-
-- **LLM retries** — every Gemini API call retries up to 3 times with exponential backoff (2s → 4s → 8s) using `tenacity`. Handles transient network errors, rate limits, and 5xx responses without crashing.
-- **Graph timeout** — the full pipeline execution is wrapped in a 60-second async timeout. If Gmail or Gemini hangs, the run exits cleanly with a logged message instead of blocking indefinitely.
-
-## Project Structure
+## Project structure
 
 ```
 ├── main.py          # Entry point — invokes the compiled graph
 ├── graph.py         # LangGraph node wiring and conditional edges
 ├── nodes.py         # Node implementations (fetch, filter, summarize, send)
-├── state.py         # Shared DigestState TypedDict
-├── models.py        # Article Pydantic model
+├── state.py         # DigestState TypedDict — shared across all nodes
+├── models.py        # Article, ArticleCard, NewsletterData Pydantic models
 ├── gmail_client.py  # Gmail API wrapper (auth, read, send)
+├── eval.py          # Offline eval harness — no Gmail needed
 └── requirements.txt
 ```
