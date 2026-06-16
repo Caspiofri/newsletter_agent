@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import json
 from bs4 import BeautifulSoup
@@ -10,7 +11,7 @@ from google import genai
 from dotenv import load_dotenv
 
 from state import DigestState
-from models import Article
+from models import Article, NewsletterData
 import gmail_client
 
 load_dotenv()
@@ -78,8 +79,10 @@ def fillter_articles(state: DigestState) -> dict:
         model="gemini-2.5-flash",
         contents=prompt
     )
-    clean_text = response.text.strip().removeprefix("```json").removesuffix("```").strip()
-    selected_names = json.loads(clean_text)
+    match = re.search(r'\[.*\]', response.text, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON array found in filter response: {response.text!r}")
+    selected_names = json.loads(match.group())
     top_articles = [a for a in articles if a.name in selected_names]
     return {"top_articles": top_articles}
 
@@ -127,59 +130,78 @@ _NEWSLETTER_CSS = """\
   }
 </style>"""
 
-_HTML_SKELETON = """\
-<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title}</title>
-  {css}
-</head>
-<body dir="rtl" style="text-align:right">
-<div class="wrapper" dir="rtl" style="text-align:right">
 
-  <div class="header">
-    <h1 dir="rtl">{title}</h1>
-    <div class="date">{today}</div>
-  </div>
+def _render_html(data: NewsletterData, title: str, today: str) -> str:
+    cards_html = ""
+    if data.cards:
+        cards_html += '  <div class="section-label" dir="rtl" style="text-align:right">🔥 עיקרי הגיליון</div>\n'
+        for card in data.cards:
+            cards_html += (
+                f'  <div class="card" dir="rtl" style="text-align:right">\n'
+                f'    <div class="card-title" dir="rtl" style="text-align:right">{card.title}</div>\n'
+                f'    <div class="card-source" dir="rtl" style="text-align:right">מקור: {card.source}</div>\n'
+                f'    <div class="card-label" dir="rtl" style="text-align:right">השורה התחתונה</div>\n'
+                f'    <div class="card-body" dir="rtl" style="text-align:right">{card.brief}</div>\n'
+                f'    <div class="card-so-what" dir="rtl" style="text-align:right">\n'
+                f'      <div class="card-label" dir="rtl" style="text-align:right">איך זה פוגש אותך</div>\n'
+                f'      <div class="card-body" dir="rtl" style="text-align:right">{card.personalization}</div>\n'
+                f'    </div>\n'
+                f'    <a href="{card.url}" class="read-more">קרא עוד &larr;</a>\n'
+                f'  </div>\n'
+            )
 
-  <!-- PASTE ARTICLE CARDS HERE (one block per top-scored article):
-  <div class="section-label" dir="rtl" style="text-align:right">🔥 עיקרי הגיליון</div>
-  <div class="card" dir="rtl" style="text-align:right">
-    <div class="card-title" dir="rtl" style="text-align:right">[EMOJI] [HEBREW TITLE]</div>
-    <div class="card-source" dir="rtl" style="text-align:right">מקור: [SOURCE NAME]</div>
-    <div class="card-label" dir="rtl" style="text-align:right">השורה התחתונה</div>
-    <div class="card-body" dir="rtl" style="text-align:right">[1-2 sentence factual summary in Hebrew]</div>
-    <div class="card-so-what" dir="rtl" style="text-align:right">
-      <div class="card-label" dir="rtl" style="text-align:right">איך זה פוגש אותך</div>
-      <div class="card-body" dir="rtl" style="text-align:right">[personalized angle for junior dev transitioning to AI]</div>
-    </div>
-    <a href="[URL]" class="read-more">קרא עוד &larr;</a>
-  </div>
-  -->
+    brief_html = ""
+    if data.brief_items:
+        items = "\n".join(
+            f'    <div class="brief-item" dir="rtl" style="text-align:right">'
+            f'{item.summary} — <a href="{item.url}">קרא עוד</a></div>'
+            for item in data.brief_items
+        )
+        brief_html = (
+            f'  <div class="brief-section" dir="rtl" style="text-align:right">\n'
+            f'    <h2 dir="rtl" style="text-align:right">⚡ עוד כותרות בקצר</h2>\n'
+            f'{items}\n'
+            f'  </div>\n'
+        )
 
-  <!-- PASTE IN-BRIEF SECTION HERE (for score 3-5 articles):
-  <div class="brief-section" dir="rtl" style="text-align:right">
-    <h2 dir="rtl" style="text-align:right">⚡ עוד כותרות בקצר</h2>
-    <div class="brief-item" dir="rtl" style="text-align:right">[1-sentence summary] — <a href="[URL]">קרא עוד</a></div>
-  </div>
-  -->
+    actions_html = ""
+    if data.actions:
+        items = "\n".join(
+            f'      <li dir="rtl" style="text-align:right">{action}</li>'
+            for action in data.actions
+        )
+        actions_html = (
+            f'  <div class="actions-section" dir="rtl" style="text-align:right">\n'
+            f'    <h2 dir="rtl" style="text-align:right">⚡ המלצות לביצוע</h2>\n'
+            f'    <ul dir="rtl" style="text-align:right">\n'
+            f'{items}\n'
+            f'    </ul>\n'
+            f'  </div>\n'
+        )
 
-  <!-- PASTE DAILY ACTIONS HERE (always last):
-  <div class="actions-section" dir="rtl" style="text-align:right">
-    <h2 dir="rtl" style="text-align:right">⚡ המלצות לביצוע</h2>
-    <ul dir="rtl" style="text-align:right">
-      <li dir="rtl" style="text-align:right">[concrete action 1]</li>
-      <li dir="rtl" style="text-align:right">[concrete action 2]</li>
-    </ul>
-  </div>
-  -->
-
-  <div class="footer">Newsletter generated automatically</div>
-</div>
-</body>
-</html>"""
+    return (
+        f'<!DOCTYPE html>\n'
+        f'<html lang="he" dir="rtl">\n'
+        f'<head>\n'
+        f'  <meta charset="UTF-8">\n'
+        f'  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        f'  <title>{title}</title>\n'
+        f'  {_NEWSLETTER_CSS}\n'
+        f'</head>\n'
+        f'<body dir="rtl" style="text-align:right">\n'
+        f'<div class="wrapper" dir="rtl" style="text-align:right">\n\n'
+        f'  <div class="header">\n'
+        f'    <h1 dir="rtl">{title}</h1>\n'
+        f'    <div class="date">{today}</div>\n'
+        f'  </div>\n\n'
+        f'{cards_html}\n'
+        f'{brief_html}\n'
+        f'{actions_html}\n'
+        f'  <div class="footer">Newsletter generated automatically</div>\n'
+        f'</div>\n'
+        f'</body>\n'
+        f'</html>'
+    )
 
 
 def summraize(state: DigestState):
@@ -197,47 +219,70 @@ def summraize(state: DigestState):
         for a in articles
     ]
 
-    today = date.today().strftime('%d.%m.%Y')
-    title = f"{newsletter_name} - {today}"
-    skeleton = _HTML_SKELETON.format(title=title, today=today, css=_NEWSLETTER_CSS)
-
     prompt = f"""You are a Senior Technical Newsletter Editor specializing in {subject}.
 Your reader: {target_audience} ({experience_level}) — a Junior Software Engineer transitioning to an AI Engineer role, focused on practical implementation, RAG architectures, and Multi-Agent Systems.
 
-TASK: Fill in the HTML skeleton below with real content. Return ONLY the completed HTML — no markdown wrappers, no commentary.
+TASK: Analyze the articles and return a JSON object with newsletter content. Return ONLY valid JSON — no markdown wrappers, no commentary.
 
-STEP 1 — SCORE each article internally (0–10) for relevance to: AI engineering, Multi-Agent pipelines, RAG, practical coding tools. Do not output scores.
-STEP 2 — CATEGORIZE:
-  - Score ≥ 6 → full article card (main section)
-  - Score 3–5 → one-line entry in "עוד כותרות בקצר"
-  - Score < 3 → exclude entirely
+STEP 1 — SCORE each article internally (0-10) for relevance to: AI engineering, Multi-Agent pipelines, RAG, practical coding tools. Do not output scores.
+STEP 2 — CATEGORIZE (all {top_k} articles must appear):
+  - Score ≥ 6 → full entry in "cards"
+  - Score < 6 → one-line entry in "brief_items"
 STEP 3 — WRITE each card:
-  - "השורה התחתונה": 1-2 sentences. Factual. What happened / what was launched. Zero fluff, no "game-changer".
-  - "איך זה פוגש אותך": 2-3 sentences. Concrete. Connect to LangGraph, RAG, or daily dev workflow. Coach the reader directly.
-STEP 4 — WRITE "המלצות לביצוע": 1-2 specific actions grounded in today's articles (e.g. "Clone X repo and run the quickstart", "Add Y as a tool node in your LangGraph agent").
+  - "brief": 1-2 sentences. Factual. What happened / what was launched. Zero fluff, no "game-changer".
+  - "personalization": 2-3 sentences. Concrete. Connect to LangGraph, RAG, or daily dev workflow. Coach the reader directly.
+STEP 4 — WRITE "actions": 1-2 specific actions grounded in today's articles.
 
 RULES:
 - Hebrew prose only. Technical terms (LangGraph, RAG, LLM, API, etc.) stay in English.
-- Every HTML element must carry dir="rtl" and style="text-align:right" as inline attributes.
-- Use ONLY the CSS classes already defined in the skeleton — do not add new <style> blocks.
-- ALL HTML comments must be in English.
+- All {top_k} articles must appear (either as a card or brief_item).
+- Provide 1-2 items in "actions".
 
-HTML SKELETON:
-{skeleton}
+OUTPUT FORMAT:
+{{
+  "cards": [
+    {{
+      "title": "[EMOJI] [HEBREW TITLE]",
+      "source": "[SOURCE NAME]",
+      "brief": "[1-2 sentence factual summary in Hebrew]",
+      "personalization": "[2-3 sentences connecting to the reader's context in Hebrew]",
+      "url": "[URL]"
+    }}
+  ],
+  "brief_items": [
+    {{
+      "summary": "[1-sentence Hebrew summary]",
+      "url": "[URL]"
+    }}
+  ],
+  "actions": [
+    "[Specific action 1 in Hebrew]",
+    "[Specific action 2 in Hebrew]"
+  ]
+}}
 
 INPUT ARTICLES:
 {articles_plain}"""
+
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=prompt,
         config={
-            "max_output_tokens": 12000,
+            "max_output_tokens": 8000,
             "thinking_config": {"thinking_budget": 4000},
         }
     )
-    newsletter_html = response.text.strip().removeprefix("```html").removesuffix("```").strip()
-    newsletter_html = newsletter_html.replace('\n', '')
-    return {"summary": newsletter_html}
+
+    match = re.search(r'\{.*\}', response.text, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON found in newsletter response: {response.text!r}")
+    data = NewsletterData(**json.loads(match.group()))
+
+    today = date.today().strftime('%d.%m.%Y')
+    title = f"{newsletter_name} - {today}"
+    html = _render_html(data, title, today)
+
+    return {"summary": html, "newsletter_data": data}
 
 
 def send_email(state: DigestState) -> dict:
