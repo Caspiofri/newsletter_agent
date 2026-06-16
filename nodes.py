@@ -9,6 +9,7 @@ from email.utils import parsedate_to_datetime
 from googleapiclient.errors import HttpError
 from google import genai
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from state import DigestState
 from models import Article, NewsletterData
@@ -18,6 +19,16 @@ load_dotenv()
 
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 gmail = gmail_client.GmailClient()
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def _call_gemini(contents: str, config: dict | None = None) -> str:
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=contents,
+        config=config or {},
+    )
+    return response.text
 
 def fetch_articles(state: DigestState) -> dict:
     label = os.getenv("GMAIL_LABEL", "INBOX")
@@ -75,13 +86,10 @@ def fillter_articles(state: DigestState) -> dict:
     please return ONLY a JSON array of the selected article names, no extra text:
     ["article name 1", "article name 2", "article name 3"]
     """
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-    match = re.search(r'\[.*\]', response.text, re.DOTALL)
+    text = _call_gemini(prompt)
+    match = re.search(r'\[.*\]', text, re.DOTALL)
     if not match:
-        raise ValueError(f"No JSON array found in filter response: {response.text!r}")
+        raise ValueError(f"No JSON array found in filter response: {text!r}")
     selected_names = json.loads(match.group())
     top_articles = [a for a in articles if a.name in selected_names]
     return {"top_articles": top_articles}
@@ -264,18 +272,14 @@ OUTPUT FORMAT:
 INPUT ARTICLES:
 {articles_plain}"""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={
-            "max_output_tokens": 8000,
-            "thinking_config": {"thinking_budget": 4000},
-        }
-    )
+    text = _call_gemini(prompt, config={
+        "max_output_tokens": 8000,
+        "thinking_config": {"thinking_budget": 4000},
+    })
 
-    match = re.search(r'\{.*\}', response.text, re.DOTALL)
+    match = re.search(r'\{.*\}', text, re.DOTALL)
     if not match:
-        raise ValueError(f"No JSON found in newsletter response: {response.text!r}")
+        raise ValueError(f"No JSON found in newsletter response: {text!r}")
     data = NewsletterData(**json.loads(match.group()))
 
     today = date.today().strftime('%d.%m.%Y')

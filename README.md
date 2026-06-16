@@ -70,6 +70,13 @@ On the first run the browser will open for OAuth consent. A `token.json` file is
 python main.py
 ```
 
+## Reliability
+
+Production fault tolerance is built into the pipeline:
+
+- **LLM retries** — every Gemini API call retries up to 3 times with exponential backoff (2s → 4s → 8s) using `tenacity`. Handles transient network errors, rate limits, and 5xx responses without crashing.
+- **Graph timeout** — the full pipeline execution is wrapped in a 60-second async timeout. If Gmail or Gemini hangs, the run exits cleanly with a logged message instead of blocking indefinitely.
+
 ## Project Structure
 
 ```

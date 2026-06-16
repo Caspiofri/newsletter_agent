@@ -6,3 +6,4 @@ langgraph
 langchain-core
 pydantic
 google-genai
+tenacity
