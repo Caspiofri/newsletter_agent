@@ -22,15 +22,15 @@ The pipeline is a **stateful LangGraph graph** with a conditional retry loop. If
 flowchart TD
     START --> fetch
 
-    fetch -->|"list[Article]"| check{articles?}
-    check -->|"yes"| filter
-    check -->|"no & tries < max_tries"| expand_search
-    check -->|"no & tries == max_tries"| END
+    fetch -->|list of Articles| check{articles?}
+    check -->|yes| filter
+    check -->|no, retrying| expand_search
+    check -->|max retries reached| END
 
-    expand_search -->|"tries +1"| fetch
+    expand_search -->|tries +1| fetch
 
-    filter -->|"top_k articles"| summarize
-    summarize -->|"HTML + NewsletterData"| send_email
+    filter -->|top_k articles| summarize
+    summarize -->|HTML + NewsletterData| send_email
     send_email -->|success / failed| END
 ```
 
@@ -130,22 +130,10 @@ pip install -r requirements.txt
 
 ### Configure
 
-Create `.env` in the project root:
+Copy `.env.example` and fill in your values:
 
-```env
-GOOGLE_API_KEY=your_gemini_api_key
-
-GMAIL_LABEL=your_gmail_label_id   # e.g. Label_123456
-
-DIGEST_SUBJECT=AI Engineering
-DIGEST_AUDIENCE=Junior Software Engineers
-DIGEST_EXPERIENCE=Junior
-DIGEST_NAME=The AI Digest
-
-NO_REPLAY_EMAIL=you@example.com
-RECIPIENT_EMAIL=recipient@example.com
-
-TOP_K=5
+```bash
+cp .env.example .env
 ```
 
 ### First run — Gmail auth
