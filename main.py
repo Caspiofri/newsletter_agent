@@ -4,8 +4,9 @@ from graph import graph
 import os.path
 
 import gmail_client
+import trace_judge
 
-GRAPH_TIMEOUT = 60
+GRAPH_TIMEOUT = 180
 
 
 async def run_profile(profile: str):
@@ -52,6 +53,8 @@ async def run_profile(profile: str):
             print(f"  → {a}")
     else:
         print(f"\nNo articles found. Email status: {result['email_status']}")
+
+    trace_judge.judge_run(result, profile)
 
 
 async def main():
