@@ -18,3 +18,4 @@ class DigestState(TypedDict):
     email_status: str
     tries: int
     max_tries: int
+    article_count_last: int

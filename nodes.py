@@ -305,4 +305,11 @@ def send_email(state: DigestState) -> dict:
 
 def expand_search(state: DigestState) -> dict:
     # TODO: implement when sources list is ready
-    return {"tries": state["tries"] + 1}
+    return {
+        "tries": state["tries"] + 1,
+        "article_count_last": len(state["articles"]),
+    }
+
+
+def no_content(state: DigestState) -> dict:
+    return {"email_status": "no_content"}

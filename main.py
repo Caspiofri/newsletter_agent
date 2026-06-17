@@ -25,6 +25,7 @@ async def run_profile(profile: str):
         "email_status": "",
         "tries": 0,
         "max_tries": 5,
+        "article_count_last": -1,
     }
     try:
         result = await asyncio.wait_for(
