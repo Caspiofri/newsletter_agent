@@ -18,6 +18,7 @@ from datetime import date, datetime
 
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import google.auth
 from google import genai
 
 load_dotenv()
@@ -25,7 +26,8 @@ load_dotenv()
 from models import Article, NewsletterData
 from nodes import fillter_articles, summraize
 
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+_credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
 
 # ---------------------------------------------------------------------------
 # Fixture articles: 6 AI-relevant, 2 off-topic (to test filter discrimination)

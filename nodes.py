@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from datetime import date
 from email.utils import parsedate_to_datetime
 from googleapiclient.errors import HttpError
+import google.auth
 from google import genai
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -17,7 +18,8 @@ import gmail_client
 
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+_credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
 gmail = gmail_client.GmailClient()
 
 
