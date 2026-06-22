@@ -19,3 +19,4 @@ class DigestState(TypedDict):
     tries: int
     max_tries: int
     article_count_last: int
+    days_back: int

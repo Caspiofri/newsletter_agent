@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from graph import graph
 import os.path
 
+import article_store
 import gmail_client
 import trace_judge
 
@@ -27,7 +28,13 @@ async def run_profile(profile: str):
         "tries": 0,
         "max_tries": 5,
         "article_count_last": -1,
+        "days_back": 1,
     }
+    db_profile = os.getenv(f"{profile}_DIGEST_NAME", profile).lower().replace(" ", "_")
+    purged = article_store.purge_old(db_profile)
+    if purged:
+        print(f"[{profile}] Purged {purged} article(s) older than {article_store.RETENTION_DAYS} days.")
+
     try:
         result = await asyncio.wait_for(
             graph.ainvoke(state, config={"configurable": {"thread_id": "1"}}),

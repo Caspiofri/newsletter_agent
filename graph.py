@@ -29,6 +29,13 @@ def check_filter(state: DigestState) -> str:
     """Exit early if the filter node produced no relevant articles."""
     if len(state["top_articles"]) == 0:
         return "no_content"
+    return "dedupe"
+
+
+def check_dedupe(state: DigestState) -> str:
+    """Exit early if dedupe removed all candidates."""
+    if len(state["top_articles"]) == 0:
+        return "no_content"
     return "summarize"
 
 
@@ -36,6 +43,7 @@ graph_builder = StateGraph(DigestState)
 graph_builder.add_node("fetch", nodes.fetch_articles)
 graph_builder.add_node("expand_search", nodes.expand_search)
 graph_builder.add_node("filter", nodes.fillter_articles)
+graph_builder.add_node("dedupe", nodes.dedupe_articles)
 graph_builder.add_node("summarize", nodes.summraize)
 graph_builder.add_node("send_email", nodes.send_email)
 graph_builder.add_node("no_content", nodes.no_content)
@@ -43,7 +51,8 @@ graph_builder.add_node("no_content", nodes.no_content)
 graph_builder.add_edge(START, "fetch")
 graph_builder.add_conditional_edges("fetch", check_fetch, ["filter", "expand_search", "no_content"])
 graph_builder.add_edge("expand_search", "fetch")
-graph_builder.add_conditional_edges("filter", check_filter, ["summarize", "no_content"])
+graph_builder.add_conditional_edges("filter", check_filter, ["dedupe", "no_content"])
+graph_builder.add_conditional_edges("dedupe", check_dedupe, ["summarize", "no_content"])
 graph_builder.add_edge("summarize", "send_email")
 graph_builder.add_edge("send_email", END)
 graph_builder.add_edge("no_content", END)
