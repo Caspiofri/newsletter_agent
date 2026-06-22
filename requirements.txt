@@ -7,3 +7,5 @@ langchain-core
 pydantic
 google-genai
 tenacity
+chromadb
+sentence-transformers
