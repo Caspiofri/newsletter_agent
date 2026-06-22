@@ -2,10 +2,11 @@
 """
 eval.py — LLM evaluation suite for the newsletter agent.
 
-Evaluates two LLM-driven nodes without touching Gmail:
+Evaluates three nodes without touching Gmail:
   1. fillter_articles — filter relevance + completeness
   2. summraize        — faithfulness, Hebrew quality, personalization,
                         actionability, and HTML structure
+  3. dedupe_articles  — RAG deduplication correctness
 
 Run with:  python eval.py
 Results are printed as a table and saved to logs/eval_<timestamp>.json
@@ -25,6 +26,7 @@ load_dotenv()
 
 from models import Article, NewsletterData
 from nodes import fillter_articles, summraize
+import article_store
 
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
@@ -341,6 +343,59 @@ def eval_newsletter(top_articles: list[Article]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Eval 3: dedupe node (RAG deduplication)
+# ---------------------------------------------------------------------------
+
+_DEDUPE_TEST_PROFILE = "eval-dedupe-test"
+
+_SEEN_ARTICLES = FIXTURE_ARTICLES[:3]   # LangGraph, RAG vs FT, o3-mini
+_UNSEEN_ARTICLE = FIXTURE_ARTICLES[3]   # Constitutional AI v2
+
+
+def eval_dedupe() -> dict:
+    try:
+        article_store._client.delete_collection(_DEDUPE_TEST_PROFILE)
+    except Exception:
+        pass
+
+    # Case 1: empty store — all should pass through
+    before = article_store.filter_seen(_SEEN_ARTICLES, _DEDUPE_TEST_PROFILE)
+    case1_pass = len(before) == len(_SEEN_ARTICLES)
+
+    # Store the seen articles
+    article_store.store_articles(_SEEN_ARTICLES, _DEDUPE_TEST_PROFILE)
+
+    # Case 2: exact same articles re-queried — all should be blocked
+    after_same = article_store.filter_seen(_SEEN_ARTICLES, _DEDUPE_TEST_PROFILE)
+    case2_pass = len(after_same) == 0
+
+    # Case 3: genuinely new article — should pass through
+    after_new = article_store.filter_seen([_UNSEEN_ARTICLE], _DEDUPE_TEST_PROFILE)
+    case3_pass = len(after_new) == 1
+
+    # Case 4: mixed batch — only unseen should pass through
+    mixed = article_store.filter_seen(_SEEN_ARTICLES[:2] + [_UNSEEN_ARTICLE], _DEDUPE_TEST_PROFILE)
+    case4_pass = len(mixed) == 1 and mixed[0].name == _UNSEEN_ARTICLE.name
+
+    try:
+        article_store._client.delete_collection(_DEDUPE_TEST_PROFILE)
+    except Exception:
+        pass
+
+    all_pass = all([case1_pass, case2_pass, case3_pass, case4_pass])
+    return {
+        "case1_empty_store": case1_pass,
+        "case2_seen_blocked": case2_pass,
+        "case3_new_passes": case3_pass,
+        "case4_mixed_batch": case4_pass,
+        "all_pass": all_pass,
+        "seen_count": len(_SEEN_ARTICLES),
+        "similarity_threshold": article_store.SIMILARITY_THRESHOLD,
+        "dedupe_days": article_store.DEDUPE_DAYS,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Report + entrypoint
 # ---------------------------------------------------------------------------
 
@@ -348,7 +403,7 @@ def _pass(ok: bool) -> str:
     return "PASS" if ok else "FAIL"
 
 
-def print_report(filter_r: dict, newsletter_r: dict) -> None:
+def print_report(filter_r: dict, newsletter_r: dict, dedupe_r: dict) -> None:
     print("\n" + "=" * 62)
     print("  NEWSLETTER AGENT EVAL REPORT")
     print("=" * 62)
@@ -396,27 +451,41 @@ def print_report(filter_r: dict, newsletter_r: dict) -> None:
     avg = sum(scores) / len(scores)
     print(f"\n  Average LLM score: {avg:.1f}/5")
     print(f"  HTML length: {newsletter_r['html_length']} chars")
+
+    print(f"\n[3] DEDUPE NODE  (threshold={dedupe_r['similarity_threshold']}, window={dedupe_r['dedupe_days']}d)")
+    cases = [
+        ("case1_empty_store", "Empty store → all pass through      "),
+        ("case2_seen_blocked", "Seen articles → blocked              "),
+        ("case3_new_passes",   "Unseen article → passes through      "),
+        ("case4_mixed_batch",  "Mixed batch → only unseen passes     "),
+    ]
+    for key, label in cases:
+        print(f"    {label}: {_pass(dedupe_r[key])}")
+    print(f"  Overall: {_pass(dedupe_r['all_pass'])}")
     print("=" * 62 + "\n")
 
 
 def main() -> None:
     print("Running newsletter agent eval...")
 
-    print("\n[1/2] Filter node...")
+    print("\n[1/3] Filter node...")
     filter_results = eval_filter()
     top_articles = filter_results.pop("_selected_objects")
 
-    print("[2/2] Newsletter node...")
+    print("[2/3] Newsletter node...")
     newsletter_results = eval_newsletter(top_articles)
 
-    print_report(filter_results, newsletter_results)
+    print("[3/3] Dedupe node...")
+    dedupe_results = eval_dedupe()
+
+    print_report(filter_results, newsletter_results, dedupe_results)
 
     os.makedirs("logs", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = f"logs/eval_{timestamp}.json"
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump(
-            {"filter": filter_results, "newsletter": newsletter_results},
+            {"filter": filter_results, "newsletter": newsletter_results, "dedupe": dedupe_results},
             f,
             ensure_ascii=False,
             indent=2,
