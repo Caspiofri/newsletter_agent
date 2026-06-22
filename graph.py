@@ -6,21 +6,17 @@ import nodes
 
 def check_fetch(state: DigestState) -> str:
     """
-    Controls the fetch → expand_search loop. Exits early on three conditions:
-    - articles found → proceed to filter
-    - max_tries reached → no_content (hard bound)
-    - stagnation: two consecutive fetches returned the same count → no_content (convergence)
+    Controls the fetch → expand_search loop.
+    - articles found          → extract
+    - days_back >= max_days_back → no_content (time window exhausted)
+    - tries >= max_tries      → no_content (too many transient failures)
+    - otherwise               → expand_search (widen the window by one day)
     """
-    articles = state["articles"]
-    tries = state["tries"]
-    max_tries = state["max_tries"]
-    last_count = state["article_count_last"]
-
-    if len(articles) > 0:
-        return "filter"
-    if tries >= max_tries:
+    if len(state["articles"]) > 0:
+        return "extract"
+    if state["days_back"] >= state["max_days_back"]:
         return "no_content"
-    if tries > 0 and len(articles) == last_count:
+    if state["tries"] >= state["max_tries"]:
         return "no_content"
     return "expand_search"
 
@@ -41,6 +37,7 @@ def check_dedupe(state: DigestState) -> str:
 
 graph_builder = StateGraph(DigestState)
 graph_builder.add_node("fetch", nodes.fetch_articles)
+graph_builder.add_node("extract", nodes.extract_sub_articles)
 graph_builder.add_node("expand_search", nodes.expand_search)
 graph_builder.add_node("filter", nodes.fillter_articles)
 graph_builder.add_node("dedupe", nodes.dedupe_articles)
@@ -49,7 +46,8 @@ graph_builder.add_node("send_email", nodes.send_email)
 graph_builder.add_node("no_content", nodes.no_content)
 
 graph_builder.add_edge(START, "fetch")
-graph_builder.add_conditional_edges("fetch", check_fetch, ["filter", "expand_search", "no_content"])
+graph_builder.add_conditional_edges("fetch", check_fetch, ["extract", "expand_search", "no_content"])
+graph_builder.add_edge("extract", "filter")
 graph_builder.add_edge("expand_search", "fetch")
 graph_builder.add_conditional_edges("filter", check_filter, ["dedupe", "no_content"])
 graph_builder.add_conditional_edges("dedupe", check_dedupe, ["summarize", "no_content"])

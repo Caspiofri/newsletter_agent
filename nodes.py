@@ -3,6 +3,7 @@ import re
 import base64
 import json
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from datetime import date
 from email.utils import parsedate_to_datetime
@@ -320,11 +321,66 @@ def dedupe_articles(state: DigestState) -> dict:
     return {"top_articles": unseen}
 
 
+def _extract_from_email(email_article: Article) -> list[Article]:
+    html_content = email_article.content[:20000]
+    prompt = f"""You are parsing a newsletter email HTML. Extract every individual article or story embedded in it.
+
+For each article found return:
+- "title": the article headline (string)
+- "url": the DIRECT link to the article — must be a full https:// URL. Skip unsubscribe, mailto, tracking pixel, or social-icon links.
+- "snippet": 2-3 sentence plain-text summary of the article content
+
+Return ONLY a valid JSON array, no markdown, no commentary:
+[{{"title": "...", "url": "...", "snippet": "..."}}]
+
+If no real articles are found, return [].
+
+HTML:
+{html_content}"""
+
+    text = _call_gemini(prompt)
+    match = re.search(r'\[.*\]', text, re.DOTALL)
+    if not match:
+        return []
+    try:
+        items = json.loads(match.group())
+    except json.JSONDecodeError:
+        return []
+
+    results = []
+    for item in items:
+        url = item.get("url", "").strip()
+        title = item.get("title", "").strip()
+        snippet = item.get("snippet", "").strip()
+        if not url or not title:
+            continue
+        results.append(Article(
+            name=title,
+            subject=email_article.subject,
+            author=email_article.author,
+            published_at=email_article.published_at,
+            content=snippet,
+            url=url,
+        ))
+    return results
+
+
+def extract_sub_articles(state: DigestState) -> dict:
+    """Explode each newsletter email into individual Article objects with real URLs."""
+    emails = state["articles"]
+    all_sub_articles: list[Article] = []
+
+    with ThreadPoolExecutor(max_workers=len(emails)) as pool:
+        futures = {pool.submit(_extract_from_email, e): e for e in emails}
+        for future in as_completed(futures):
+            all_sub_articles.extend(future.result())
+
+    return {"articles": all_sub_articles}
+
+
 def expand_search(state: DigestState) -> dict:
     return {
-        "tries": state["tries"] + 1,
         "days_back": state.get("days_back", 1) + 1,
-        "article_count_last": len(state["articles"]),
     }
 
 

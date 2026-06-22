@@ -16,18 +16,20 @@ Built with LangGraph, Google Gemini 2.5, and a multi-criteria LLM-as-judge eval 
 
 ## Architecture
 
-The pipeline is a **stateful LangGraph graph** with a conditional retry loop. If the Gmail fetch returns no articles (label empty, API hiccup), the graph backs off and retries up to `max_tries` times before failing gracefully.
+The pipeline is a **stateful LangGraph graph** with a conditional retry loop. Two independent knobs control the loop: `max_days_back` (how far back in time to search) and `max_tries` (transient failure retries). If neither limit is reached and no articles are found, the graph widens the search window by one day and retries.
 
 ```mermaid
 flowchart TD
     START --> fetch
 
     fetch -->|list of Articles| check{articles?}
-    check -->|yes| filter
-    check -->|no, retrying| expand_search
-    check -->|max retries / stagnation| no_content
+    check -->|yes| extract
+    check -->|no, days_back < max_days_back| expand_search
+    check -->|days_back >= max_days_back or tries >= max_tries| no_content
 
     expand_search -->|days_back +1| fetch
+
+    extract -->|list of sub-Articles with real URLs| filter
 
     filter -->|top_k articles| check2{any relevant?}
     check2 -->|yes| dedupe
@@ -47,8 +49,9 @@ flowchart TD
 
 | Node | What it does |
 |---|---|
-| `fetch` | Gmail API → decode MIME parts → `list[Article]` |
-| `expand_search` | increments retry counter and widens the date window (`days_back + 1`) |
+| `fetch` | Gmail API → decode MIME parts → `list[Article]` (one per email) |
+| `extract` | Parallel Gemini calls — explodes each email into individual sub-articles with real URLs |
+| `expand_search` | Widens the search window (`days_back + 1`) when no emails found |
 | `filter` | Gemini scores all article titles by subject relevance, returns top-k names |
 | `dedupe` | ChromaDB vector search — drops articles seen within the last 3 days |
 | `summarize` | Gemini writes full newsletter JSON → rendered to HTML |
@@ -110,7 +113,7 @@ python eval.py
 
 ## Reliability
 
-Every Gemini call is wrapped in **tenacity** — 3 retries with exponential backoff (2 s → 4 s → 8 s). The full graph execution runs inside a **60-second asyncio timeout** so a hanging API call never blocks the daily run.
+Every Gemini call is wrapped in **tenacity** — 3 retries with exponential backoff (2 s → 4 s → 8 s). The full graph execution runs inside a **600-second asyncio timeout** so a hanging API call never blocks the daily run.
 
 ---
 

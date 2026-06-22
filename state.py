@@ -16,7 +16,7 @@ class DigestState(TypedDict):
     newsletter_data: Optional[NewsletterData]
     summary: str
     email_status: str
-    tries: int
-    max_tries: int
-    article_count_last: int
-    days_back: int
+    tries: int          # transient failure retries (API errors)
+    max_tries: int      # hard cap on failure retries
+    days_back: int      # current search window in days
+    max_days_back: int  # max time window before giving up

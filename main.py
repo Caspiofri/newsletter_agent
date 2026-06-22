@@ -7,7 +7,7 @@ import article_store
 import gmail_client
 import trace_judge
 
-GRAPH_TIMEOUT = 180
+GRAPH_TIMEOUT = 600
 
 
 async def run_profile(profile: str):
@@ -26,9 +26,9 @@ async def run_profile(profile: str):
         "summary": "",
         "email_status": "",
         "tries": 0,
-        "max_tries": 5,
-        "article_count_last": -1,
+        "max_tries": 3,
         "days_back": 1,
+        "max_days_back": 7,
     }
     db_profile = os.getenv(f"{profile}_DIGEST_NAME", profile).lower().replace(" ", "_")
     purged = article_store.purge_old(db_profile)
