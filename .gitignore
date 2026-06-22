@@ -18,3 +18,9 @@ env/
 # IDE
 .vscode/
 .idea/
+
+# Planning / design docs (not production code)
+PRD.md
+
+# Runtime data (Chroma DB, learned weights)
+data/
