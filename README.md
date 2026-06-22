@@ -24,12 +24,12 @@ flowchart TD
 
     fetch -->|list of Articles| check{articles?}
     check -->|yes| extract
-    check -->|no, days_back < max_days_back| expand_search
-    check -->|days_back >= max_days_back or tries >= max_tries| no_content
+    check -->|no, window not exhausted| expand_search
+    check -->|max days or max tries reached| no_content
 
-    expand_search -->|days_back +1| fetch
+    expand_search -->|days_back plus 1| fetch
 
-    extract -->|list of sub-Articles with real URLs| filter
+    extract -->|sub-articles with real URLs| filter
 
     filter -->|top_k articles| check2{any relevant?}
     check2 -->|yes| dedupe
@@ -40,8 +40,8 @@ flowchart TD
     check3 -->|all seen| no_content
 
     summarize -->|HTML + NewsletterData| send_email
-    send_email -->|success → store in ChromaDB| END
-    send_email -->|failed → skip store| END
+    send_email -->|success, store in ChromaDB| END
+    send_email -->|failed, skip store| END
     no_content --> END
 ```
 
