@@ -15,6 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from state import DigestState
 from models import Article, NewsletterData
 import gmail_client
+import article_store
 
 load_dotenv()
 
@@ -33,8 +34,8 @@ def _call_gemini(contents: str, config: dict | None = None) -> str:
     return response.text
 
 def fetch_articles(state: DigestState) -> dict:
-    label = os.getenv("GMAIL_LABEL", "INBOX")
-    messages = gmail.gmail_read_messages(label, days_back=1)
+    label = state["gmail_label"]
+    messages = gmail.gmail_read_messages(label, days_back=state.get("days_back", 1))
     articles = []
     for message in messages:
         payload = message['payload']
@@ -298,15 +299,31 @@ def send_email(state: DigestState) -> dict:
     to = state['recipient']
     try:
         gmail.gmail_send_message(to, sender, subject, html_content)
-        return {"email_status": "success"}
     except HttpError:
         return {"email_status": "failed"}
 
+    profile = state["digest_name"].lower().replace(" ", "_")
+    try:
+        article_store.store_articles(state["top_articles"], profile)
+    except Exception as e:
+        print(f"[warn] Failed to store articles in ChromaDB: {e}")
+
+    return {"email_status": "success"}
+
+
+def dedupe_articles(state: DigestState) -> dict:
+    profile = state["digest_name"].lower().replace(" ", "_")
+    unseen = article_store.filter_seen(state["top_articles"], profile)
+    dropped = len(state["top_articles"]) - len(unseen)
+    if dropped:
+        print(f"[dedupe] Dropped {dropped} article(s) seen in the last {article_store.DEDUPE_DAYS} days.")
+    return {"top_articles": unseen}
+
 
 def expand_search(state: DigestState) -> dict:
-    # TODO: implement when sources list is ready
     return {
         "tries": state["tries"] + 1,
+        "days_back": state.get("days_back", 1) + 1,
         "article_count_last": len(state["articles"]),
     }
 
