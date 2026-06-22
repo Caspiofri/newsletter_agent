@@ -25,13 +25,22 @@ flowchart TD
     fetch -->|list of Articles| check{articles?}
     check -->|yes| filter
     check -->|no, retrying| expand_search
-    check -->|max retries reached| END
+    check -->|max retries / stagnation| no_content
 
-    expand_search -->|tries +1| fetch
+    expand_search -->|days_back +1| fetch
 
-    filter -->|top_k articles| summarize
+    filter -->|top_k articles| check2{any relevant?}
+    check2 -->|yes| dedupe
+    check2 -->|no| no_content
+
+    dedupe -->|unseen articles| check3{any unseen?}
+    check3 -->|yes| summarize
+    check3 -->|all seen| no_content
+
     summarize -->|HTML + NewsletterData| send_email
-    send_email -->|success / failed| END
+    send_email -->|success → store in ChromaDB| END
+    send_email -->|failed → skip store| END
+    no_content --> END
 ```
 
 ### Node responsibilities
@@ -39,10 +48,12 @@ flowchart TD
 | Node | What it does |
 |---|---|
 | `fetch` | Gmail API → decode MIME parts → `list[Article]` |
-| `expand_search` | increments retry counter (search broadening is a TODO) |
+| `expand_search` | increments retry counter and widens the date window (`days_back + 1`) |
 | `filter` | Gemini scores all article titles by subject relevance, returns top-k names |
+| `dedupe` | ChromaDB vector search — drops articles seen within the last 3 days |
 | `summarize` | Gemini writes full newsletter JSON → rendered to HTML |
-| `send_email` | Gmail API sends the HTML digest |
+| `send_email` | Gmail API sends the HTML digest; stores articles in ChromaDB only on success |
+| `no_content` | Terminal node when no sendable articles exist |
 
 ---
 
@@ -62,7 +73,7 @@ The LLM is given a structured output schema (Pydantic → JSON) so the HTML rend
 
 ## Eval harness
 
-`eval.py` runs the two LLM nodes against fixture data — **no Gmail required** — and produces a quality report.
+`eval.py` runs three nodes against fixture data — **no Gmail required** — and produces a quality report.
 
 **Fixture set:** 6 AI-engineering articles + 2 deliberately off-topic (startup funding, health study) to test filter discrimination.
 
@@ -85,6 +96,8 @@ The LLM is given a structured output schema (Pydantic → JSON) so the HTML rend
 | **Hebrew quality** | Fluent prose; technical terms (RAG, LLM, API) kept in English |
 | **Personalization** | Advice is concrete and specific to the target audience's stack |
 | **Actionability** | 1–2 immediately executable actions tied to today's articles |
+
+The third eval suite covers the `dedupe` node — four cases: empty store passes all, seen articles are blocked, genuinely new articles pass through, and mixed batches return only the unseen subset.
 
 Run it:
 
@@ -109,6 +122,7 @@ Every Gemini call is wrapped in **tenacity** — 3 retries with exponential back
 | LLM | Gemini 2.5 Flash | Extended thinking budget for the summarize step; cost-effective for daily runs |
 | Email | Gmail API (OAuth 2.0) | Native read + send from an existing inbox, no extra infra |
 | Data modeling | Pydantic | Structured LLM output that fails loudly on schema violations |
+| Deduplication | ChromaDB + sentence-transformers | Vector similarity dedupe prevents resending articles seen in the last 3 days |
 | Fault tolerance | tenacity + asyncio timeout | Handles transient LLM failures without manual intervention |
 
 ---
@@ -149,12 +163,14 @@ python main.py
 ## Project structure
 
 ```
-├── main.py          # Entry point — invokes the compiled graph
-├── graph.py         # LangGraph node wiring and conditional edges
-├── nodes.py         # Node implementations (fetch, filter, summarize, send)
-├── state.py         # DigestState TypedDict — shared across all nodes
-├── models.py        # Article, ArticleCard, NewsletterData Pydantic models
-├── gmail_client.py  # Gmail API wrapper (auth, read, send)
-├── eval.py          # Offline eval harness — no Gmail needed
+├── main.py            # Entry point — invokes the compiled graph
+├── graph.py           # LangGraph node wiring and conditional edges
+├── nodes.py           # Node implementations (fetch, filter, dedupe, summarize, send)
+├── state.py           # DigestState TypedDict — shared across all nodes
+├── models.py          # Article, ArticleCard, NewsletterData Pydantic models
+├── gmail_client.py    # Gmail API wrapper (auth, read, send)
+├── article_store.py   # ChromaDB vector store — deduplication and article retention
+├── trace_judge.py     # Per-run LLM-as-judge with 3-stage scoring
+├── eval.py            # Offline eval harness — no Gmail needed
 └── requirements.txt
 ```
