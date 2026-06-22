@@ -109,6 +109,34 @@ python eval.py
 # Results printed as a table and saved to logs/eval_<timestamp>.json
 ```
 
+### Live trace judging (`trace_judge.py`)
+
+`eval.py` tests nodes in isolation against fixtures. `trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.
+
+It scores three stages on a 1–5 scale:
+
+| Stage | Method | What it measures |
+|---|---|---|
+| `fetch_health` | Rule-based | Loop efficiency — how many retries before articles were found; penalises stagnation and hard-limit hits |
+| `filter_quality` | LLM judge | Whether the selected top-k articles are genuinely the most relevant to the configured subject |
+| `content_faithfulness` | LLM judge | Whether every factual claim in the generated cards is traceable to a source article — no hallucinated details |
+
+After each run the report is printed to stdout as a scored bar chart and saved to `logs/trace_<profile>_<timestamp>.json`:
+
+```json
+{
+  "profile": "AI",
+  "overall": 4.3,
+  "stages": [
+    { "stage": "fetch_health",       "score": 5, "reasoning": "Fetched 24 articles on the first attempt." },
+    { "stage": "filter_quality",     "score": 4, "reasoning": "Selected articles closely match the AI engineering subject." },
+    { "stage": "content_faithfulness","score": 4, "reasoning": "All card claims supported by source snippets." }
+  ]
+}
+```
+
+> This pattern — attaching a lightweight LLM judge to every live trace rather than only to offline evals — aligns with LangChain's [Building a 100x Cheaper Trace Judge](https://blog.langchain.dev/building-a-100x-cheaper-llm-judge/) (June 15, 2025).
+
 ---
 
 ## Reliability

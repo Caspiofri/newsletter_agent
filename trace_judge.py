@@ -92,29 +92,30 @@ def _judge_fetch_health(
     articles: list[Article],
     tries: int,
     max_tries: int,
-    article_count_last: int,
+    days_back: int,
+    max_days_back: int,
     email_status: str,
 ) -> StageScore:
     n = len(articles)
 
     if email_status == "no_content" and n == 0:
         score, reasoning = 1, "Pipeline exited with no articles after exhausting retries."
-    elif tries > 0 and n == article_count_last:
-        score, reasoning = 2, f"Convergence detected after {tries} tries — expand_search produced no new articles."
+    elif days_back >= max_days_back and n == 0:
+        score, reasoning = 1, f"Time window exhausted ({days_back} days back) with zero articles."
     elif tries >= max_tries and n == 0:
-        score, reasoning = 1, f"Hard limit of {max_tries} tries reached with zero articles."
-    elif tries == 0:
-        score, reasoning = 5, f"Fetched {n} articles on the first attempt — no retries needed."
-    elif tries == 1:
-        score, reasoning = 4, f"Fetched {n} articles after 1 retry."
+        score, reasoning = 1, f"Hard failure limit of {max_tries} tries reached with zero articles."
+    elif days_back == 1:
+        score, reasoning = 5, f"Fetched {n} articles on the first attempt — no window expansion needed."
+    elif days_back == 2:
+        score, reasoning = 4, f"Fetched {n} articles after expanding to {days_back} days back."
     else:
-        score, reasoning = 3, f"Fetched {n} articles after {tries} retries."
+        score, reasoning = 3, f"Fetched {n} articles after expanding to {days_back} days back."
 
     return StageScore(
         stage="fetch_health",
         score=score,
         reasoning=reasoning,
-        details={"articles_fetched": n, "tries": tries, "max_tries": max_tries},
+        details={"articles_fetched": n, "days_back": days_back, "max_days_back": max_days_back, "tries": tries},
     )
 
 
@@ -216,8 +217,9 @@ def judge_run(result: dict, profile: str) -> TraceReport:
         _judge_fetch_health(
             articles=result.get("articles", []),
             tries=result.get("tries", 0),
-            max_tries=result.get("max_tries", 5),
-            article_count_last=result.get("article_count_last", -1),
+            max_tries=result.get("max_tries", 3),
+            days_back=result.get("days_back", 1),
+            max_days_back=result.get("max_days_back", 7),
             email_status=result.get("email_status", ""),
         ),
         _judge_filter_quality(
