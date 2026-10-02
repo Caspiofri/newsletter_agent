@@ -13,10 +13,11 @@ from google import genai
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from modules.state import DigestState
+from config import settings
+from modules.collectors import hackernews, medium
 from modules.models import Article, NewsletterData
-from modules import gmail_client, article_store, link_utils
+from modules import gmail_client, article_store, link_utils, reader
 
-import config.settings  # noqa: F401  (loads .env)
 
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
@@ -338,12 +339,113 @@ def send_email(state: DigestState) -> dict:
 
 
 def dedupe_articles(state: DigestState) -> dict:
+    """Drop stories already sent in the last few days, before they can take a shortlist slot."""
     profile = state["digest_name"].lower().replace(" ", "_")
-    unseen = article_store.filter_seen(state["top_articles"], profile)
-    dropped = len(state["top_articles"]) - len(unseen)
+    unseen = article_store.filter_seen(state["articles"], profile)
+    dropped = len(state["articles"]) - len(unseen)
     if dropped:
         print(f"[dedupe] Dropped {dropped} article(s) seen in the last {article_store.DEDUPE_DAYS} days.")
-    return {"top_articles": unseen}
+    return {"articles": unseen}
+
+
+def shortlist_articles(state: DigestState) -> dict:
+    """Title screen run separately per source, so one noisy source cannot crowd out the others."""
+    articles = state["articles"]
+    origins = sorted({a.origin for a in articles})
+
+    def screen(origin: str) -> list[Article]:
+        group = [a for a in articles if a.origin == origin]
+        quota = settings.SHORTLIST_QUOTA.get(origin, 5)
+        return fillter_articles({**state, "articles": group, "top_k": quota})["top_articles"]
+
+    with ThreadPoolExecutor(max_workers=max(len(origins), 1)) as pool:
+        candidates = [a for group in pool.map(screen, origins) for a in group]
+    print(f"[shortlist] {len(candidates)} of {len(articles)} candidates: "
+          f"{ {o: sum(c.origin == o for c in candidates) for o in origins} }")
+    return {"candidates": candidates}
+
+
+def read_articles(state: DigestState) -> dict:
+    candidates = reader.read_articles(state["candidates"], max_chars=settings.READ_MAX_CHARS)
+    stats = {s: sum(a.read_status == s for a in candidates) for s in ("full", "partial", "snippet")}
+    print(f"[reader] read status: {stats}")
+    return {"candidates": candidates}
+
+
+_SOURCE_DESCRIPTIONS = {
+    "inbox": "newsletter email curated by an editor",
+    "medium": "Medium tag feed — unvetted, anyone can publish; often beginner tutorials or self-promotion",
+    "hackernews": "Hacker News front-page style submission voted by engineers",
+}
+
+
+def _final_scores(scored: list, candidates: list[Article], snippet_cap: int) -> dict[int, float]:
+    """id -> score. Unknown ids and malformed rows are ignored; snippet-only articles are capped."""
+    best: dict[int, float] = {}
+    for row in scored:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), int):
+            continue
+        if 0 <= row["id"] < len(candidates) and isinstance(row.get("score"), (int, float)):
+            best[row["id"]] = max(best.get(row["id"], 0), row["score"])
+    return {i: min(sc, snippet_cap) if candidates[i].read_status == "snippet" else sc for i, sc in best.items()}
+
+
+def _select_top(scored: list, candidates: list[Article], top_k: int, min_score: int,
+                snippet_cap: int = 10) -> list[Article]:
+    """Best-first articles with final score >= min_score."""
+    final = _final_scores(scored, candidates, snippet_cap)
+    ranked = sorted((i for i, sc in final.items() if sc >= min_score), key=lambda i: -final[i])
+    return [candidates[i] for i in ranked[:top_k]]
+
+
+def rank_articles(state: DigestState) -> dict:
+    """One LLM call scores every candidate on its content and source; the best top_k become top_articles."""
+    candidates = state["candidates"]
+    if not candidates:
+        return {"top_articles": []}
+    top_k = int(state["top_k"])
+    items = [
+        {
+            "id": i,
+            "title": a.name,
+            "source": _SOURCE_DESCRIPTIONS.get(a.origin, a.origin) + (f" ({a.signal})" if a.signal else ""),
+            "text_available": a.read_status,
+            "text": a.content[:2500],
+        }
+        for i, a in enumerate(candidates)
+    ]
+    prompt = f"""You are the editor of a daily digest about {state["subject"]}.
+Reader: {state["target_audience"]} ({state["experience_level"]}).
+
+Score each candidate article 0-10 for how much this reader would value reading it, judging the TEXT, not just the title.
+Reward: concrete engineering substance, primary sources (releases, papers, engineering blogs), novel results, practical techniques for RAG / agents / LLM systems.
+Penalize: beginner tutorials, listicles, self-promotion, vague hype, thin teasers with no substance, off-topic items.
+"text_available" tells how much text you have: "full", "partial", or "snippet" (teaser only). Do not reward a good title when the text is empty of substance.
+Calibration: 9-10 = must-read; 7-8 = clearly worth the reader's time; 5-6 = acceptable filler; 3-4 = skip; 0-2 = off-topic or junk.
+Be strict: on a typical day only about {top_k} candidates deserve 7 or above, and most should land in 3-6.
+
+Return ONLY a JSON array, no commentary: [{{"id": 0, "score": 7, "reason": "short reason"}}]
+
+CANDIDATES:
+{json.dumps(items, ensure_ascii=False)}"""
+
+    text = _call_gemini(prompt)
+    match = re.search(r'\[.*\]', text or "", re.DOTALL)
+    try:
+        scored = json.loads(match.group()) if match else []
+    except json.JSONDecodeError:
+        scored = []
+    if not scored:
+        raise ValueError(f"No usable scores in ranker response: {text!r}")
+    final = _final_scores(scored, candidates, settings.SNIPPET_SCORE_CAP)
+    top = _select_top(scored, candidates, top_k, settings.RANK_MIN_SCORE, settings.SNIPPET_SCORE_CAP)
+    reasons = {r["id"]: r.get("reason", "") for r in scored if isinstance(r, dict) and isinstance(r.get("id"), int)}
+    picked = {id(a) for a in top}
+    for i in sorted(final, key=lambda i: -final[i]):
+        a = candidates[i]
+        mark = "*" if id(a) in picked else " "
+        print(f"[rank]{mark}{final[i]:>4}  {a.origin:<10} {a.read_status:<7} {a.name[:55]} — {reasons.get(i, '')[:60]}")
+    return {"top_articles": top}
 
 
 def _map_selection_to_articles(items: list, candidates: list[dict], email_article: Article) -> list[Article]:
@@ -411,8 +513,10 @@ LINKS:
 
 
 def extract_sub_articles(state: DigestState) -> dict:
-    """Explode each newsletter email into individual Article objects with real, live URLs."""
+    """Explode each newsletter email into individual Article objects with real URLs."""
     emails = state["articles"]
+    if not emails:
+        return {"articles": []}
     all_sub_articles: list[Article] = []
 
     with ThreadPoolExecutor(max_workers=len(emails)) as pool:
@@ -420,14 +524,38 @@ def extract_sub_articles(state: DigestState) -> dict:
         for future in as_completed(futures):
             all_sub_articles.extend(future.result())
 
-    status = link_utils.classify_links([a.url for a in all_sub_articles])
-    checked = [a.model_copy(update={"link_status": status[a.url]}) for a in all_sub_articles]
+    return {"articles": all_sub_articles}
+
+
+def collect_medium(state: DigestState) -> dict:
+    return {"extra_articles": medium.collect(
+        state["medium_tags"], state["subject"], settings.COLLECTOR_MAX_AGE_DAYS)}
+
+
+def collect_hackernews(state: DigestState) -> dict:
+    return {"extra_articles": hackernews.collect(
+        state["hn_queries"], state["subject"], settings.COLLECTOR_MAX_AGE_DAYS, settings.HN_MIN_POINTS)}
+
+
+def merge_sources(state: DigestState) -> dict:
+    """Join point for all collectors: de-duplicate by URL, check every link, swap bad links for direct ones."""
+    pool = list(state["articles"]) + list(state["extra_articles"])
+    by_url = {}
+    for a in pool:
+        by_url.setdefault(a.url, a)
+    articles = list(by_url.values())
+
+    status = link_utils.classify_links([a.url for a in articles])
+    checked = [a.model_copy(update={"link_status": status[a.url]}) for a in articles]
     bad_before = sum(a.link_status != "ok" for a in checked)
     upgraded = article_store.upgrade_bad_links(checked)
     bad_after = sum(a.link_status != "ok" for a in upgraded)
+
+    per_source = {o: sum(a.origin == o for a in upgraded) for o in sorted({a.origin for a in upgraded})}
+    print(f"[merge] {len(upgraded)} articles by source: {per_source}")
     if bad_before:
-        print(f"[extract] {bad_before} article(s) had a dead/unverifiable link; "
-              f"{bad_before - bad_after} replaced by a direct link from another newsletter, {bad_after} remain.")
+        print(f"[merge] {bad_before} article(s) had a dead/unverifiable link; "
+              f"{bad_before - bad_after} replaced by a direct link, {bad_after} remain.")
     return {"articles": upgraded}
 
 

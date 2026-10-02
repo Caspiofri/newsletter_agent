@@ -1,4 +1,5 @@
-from typing import TypedDict, Optional
+import operator
+from typing import Annotated, TypedDict, Optional
 from modules.models import Article, NewsletterData
 
 
@@ -11,7 +12,12 @@ class DigestState(TypedDict):
     recipient: str
     sender: str
     top_k: int
+    medium_tags: list[str]
+    hn_queries: list[str]
     articles: list[Article]
+    candidates: list[Article]  # per-source shortlist, read and ranked into top_articles
+    # written in parallel by the collector nodes; combined with `articles` in merge_sources
+    extra_articles: Annotated[list[Article], operator.add]
     top_articles: list[Article]
     newsletter_data: Optional[NewsletterData]
     summary: str

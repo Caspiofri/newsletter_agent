@@ -1,7 +1,7 @@
 import asyncio
 import os
 import traceback
-import config.settings  # noqa: F401  (loads .env)
+from config import settings  # also loads .env
 from modules.graph import graph
 import requests
 
@@ -21,6 +21,11 @@ def _ping_healthcheck(ok: bool, message: str = ""):
         print(f"[warn] Failed to ping healthcheck: {e}")
 
 
+def _env_list(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name)
+    return [x.strip() for x in raw.split(",") if x.strip()] if raw else list(default)
+
+
 async def run_profile(profile: str) -> str:
     state = {
         "gmail_label": os.getenv(f"{profile}_GMAIL_LABEL_ID"),
@@ -31,7 +36,11 @@ async def run_profile(profile: str) -> str:
         "recipient": os.getenv(f"{profile}_RECIPIENT"),
         "sender": os.getenv("NO_REPLAY_EMAIL"),
         "top_k": os.getenv("TOP_K"),
+        "medium_tags": _env_list(f"{profile}_MEDIUM_TAGS", settings.DEFAULT_MEDIUM_TAGS),
+        "hn_queries": _env_list(f"{profile}_HN_QUERIES", settings.DEFAULT_HN_QUERIES),
         "articles": [],
+        "candidates": [],
+        "extra_articles": [],
         "top_articles": [],
         "newsletter_data": None,
         "summary": "",

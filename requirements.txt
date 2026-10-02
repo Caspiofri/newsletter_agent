@@ -9,3 +9,5 @@ google-genai
 tenacity
 chromadb
 sentence-transformers
+trafilatura
+lxml_html_clean

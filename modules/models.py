@@ -10,6 +10,9 @@ class Article(BaseModel):
     content: str
     url: Optional[str] = None
     author: Optional[str] = None
+    origin: str = "inbox"  # which collector found it: "inbox" | "medium" | "hackernews"
+    read_status: str = "snippet"  # "full" | "partial" | "snippet" (see reader.read_article)
+    signal: str = ""  # source-specific quality hint, e.g. "193 points, 40 comments" for Hacker News
     link_status: str = "ok"  # "ok" | "dead" (404/410) | "unverified" (bot challenge, can't be checked)
 
 

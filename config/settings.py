@@ -15,3 +15,15 @@ CREDENTIALS_PATH = CONFIG_DIR / "credentials.json"
 TOKEN_PATH = CONFIG_DIR / "token.json"
 CHROMA_PATH = DATA_DIR / "chroma_db"
 GOLDEN_SET_PATH = EVALS_DIR / "golden_set.json"
+
+# Active collectors. Each can be overridden per profile in .env, e.g. AI_MEDIUM_TAGS=ai-agents,llm (comma-separated).
+DEFAULT_MEDIUM_TAGS = ["ai-agents", "llm", "rag", "langchain", "generative-ai"]
+DEFAULT_HN_QUERIES = ["LLM", "AI agents", "RAG", "LangGraph"]
+HN_MIN_POINTS = 20
+COLLECTOR_MAX_AGE_DAYS = 2
+
+# Ranking pipeline: how many candidates per source reach the reader/ranker, and the minimum ranker score to be included.
+SHORTLIST_QUOTA = {"inbox": 10, "hackernews": 6, "medium": 6}
+READ_MAX_CHARS = 6000
+RANK_MIN_SCORE = 5
+SNIPPET_SCORE_CAP = 6  # an article we could only read a teaser of cannot score above this
