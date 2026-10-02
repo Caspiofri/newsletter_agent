@@ -1,0 +1,318 @@
+[
+  {
+    "run_ts": "20260813_070353",
+    "judge_original_score": 3,
+    "judge_original_reasoning": "While most claims are directly supported, one card introduces 'LangGraph' as an example of loop and graph engineering, which is not mentioned in the corresponding source article, constituting a minor embellishment.",
+    "sources": [
+      {
+        "name": "Grok's Next Evolution: Grok 4.6 and Grok @Bot",
+        "content": "Grok's Next Evolution: Grok 4.6 and Grok @Bot. In a recent X post, Elon Musk revealed Grok 4.6, the latest iteration of xAI's conversational AI, along with a new feature, Grok @Bot. The Grok 4.6 update promises significant advancements over its predecessor, with Musk touting its superior performance compared to leading AI models in a number of benchmarks. Musk also hinted at an upcoming feature allowing users to utilize Grok AI directly within X posts by mentioning \"@Grok.\""
+      },
+      {
+        "name": "Meta Advances AI Research with New Open-Source Framework",
+        "content": "Meta Advances AI Research with New Open-Source Framework. Meta (formerly Facebook) continues its aggressive push in artificial intelligence research, recently announcing a new open-source AI framework aimed at accelerating developments in machine learning. This initiative underscores Meta's commitment to fostering a collaborative environment within the AI community, believing that shared resources and open innovation are key to solving some of AI's most complex challenges. The framework is designed to provide researchers and developers with a robust se"
+      },
+      {
+        "name": "Why enterprise AI projects fail at the agent layer",
+        "content": "Why enterprise AI projects fail at the agent layer. Enterprise AI failures increasingly stem from how agents are governed and orchestrated rather than from the models themselves. Companies risk losing control when they outsource too much of that reasoning layer to vendors."
+      },
+      {
+        "name": "AlphaSignal Workshop: Harness Orchestration: What Comes After Agentic Loop and Graph Engineering | August 20, 2026",
+        "content": "AlphaSignal Workshop: Harness Orchestration: What Comes After Agentic Loop and Graph Engineering | August 20, 2026. Loop and graph engineering are weeks old and already hitting a ceiling. Orchestration is what's past that: hundreds of harnesses working as one system, deciding their own shape as they go. Join AlphaSignal x AgentField on Aug 20 @ 10am PT to learn the handful of arrangements that cover most real systems and see exactly how we used them to build our open source code review tool (currently state of the art)."
+      },
+      {
+        "name": "Security flaw lets anyone steal hidden reasoning from Claude, GPT, and Gemini",
+        "content": "Security flaw lets anyone steal hidden reasoning from Claude, GPT, and Gemini. The irony? Just as agents get closer to your files and repos, researchers found that the \"encrypted\" reasoning those same agents produce is basically a shared secret anyone can decode. Closer access, bigger blast radius."
+      }
+    ],
+    "cards": [
+      {
+        "title": "🛠️ כשפרויקטי AI בארגונים נכשלים: שליטה בשכבת ה-Agent",
+        "source": "מקור: The Register",
+        "brief": "כשלונות בפרויקטי AI ארגוניים נובעים יותר ויותר מבעיות בממשל (governance) ותזמור (orchestration) של agents, ולא מאיכות המודלים עצמם. ארגונים מסתכנים באובדן שליטה כשהם מוסרים יותר מדי משכבת ההיגיון לספקים חיצוניים.",
+        "personalization": "בתור מי שבונה מערכות Multi-Agent, הבנת נקודת הכשל הזו היא קריטית. אל תחשוב רק על קוד, אלא גם על הארכיטקטורה הכוללת ואיך לשמור על שליטה בלוגיקת הליבה שלך, במיוחד כשאתה משלב רכיבי RAG שמביאים מידע חיצוני. זה מונע Vendor Lock-in ומשפר את היכולת לתחזק ולשפר את המערכת שלך לאורך זמן."
+      },
+      {
+        "title": "🚀 אחרי LangGraph: תזמור מתקדם של Agents",
+        "source": "מקור: AlphaSignal",
+        "brief": "סדנת AlphaSignal חושפת כי הנדסת לולאות וגרפים (כמו ב-LangGraph) כבר מגיעה לתקרת זכוכית, ומציעה את 'תזמור' (Orchestration) כשלב הבא. גישה זו כוללת 'רתימות' (harnesses) רבות הפועלות כמערכת אחת, המחליטות על צורתן באופן דינמי.",
+        "personalization": "כמי שמתמקד ב-LangGraph ובמערכות Multi-Agent, זהו עדכון חיוני. עליך להבין את המגבלות של הכלים הקיימים ולחשוב קדימה. אולי כדאי לחקור את רעיונות ה-'harness orchestration' כבר עכשיו כדי להיות בחזית הטכנולוגיה, במיוחד כשאתה בונה מערכות RAG מורכבות הדורשות קואורדינציה בין agents שונים."
+      },
+      {
+        "title": "🔒 חשיפת חולשת אבטחה ב-LLMs מובילים",
+        "source": "מקור: AlphaSignal",
+        "brief": "חוקרים גילו חולשת אבטחה המאפשרת לחלץ את ה'היגיון הסמוי' (hidden reasoning) של מודלי LLM כמו Claude, GPT ו-Gemini, למרות שהוצג כ'מוצפן'. חולשה זו מדגישה סיכון מוגבר ככל ש-agents מקבלים גישה רחבה יותר לקבצים ורפוזיטוריות.",
+        "personalization": "כאשר אתה מתכנן מערכות RAG או Multi-Agent שפועלות על נתונים ארגוניים רגישים, אבטחה היא מעל הכל. חולשה כזו מחייבת אותך לבחון מחדש את ההנחות לגבי פרטיות ואינטגרציה של LLMs. ודא שאתה מטמיע בקרות גישה הדוקות, סקירות קוד קפדניות, ושוקל היטב את רמת הגישה שאתה מעניק ל-agents שלך למערכות קריטיות."
+      }
+    ],
+    "human_label": {
+      "score": 3,
+      "note": "3/5 (Unfaithful) - Card 2 (אחרי LangGraph). The brief section explicitly adds \"(כמו ב-LangGraph)\" as an example, but LangGraph is never mentioned in the source article (\"AlphaSignal Workshop\"). The LLM judge correctly identified this minor embellishment in the factual brief."
+    }
+  },
+  {
+    "run_ts": "20260818_070542",
+    "judge_original_score": 3,
+    "judge_original_reasoning": "While most claims are directly supported, one card misinterprets 'cybersecurity gains were unplanned' to mean the cybersecurity improvement was not the model's main goal, which contradicts the source stating the model was 'built for cybersecurity defense'.",
+    "sources": [
+      {
+        "name": "Meta's Llama 3.5 Challenges OpenAI's Dominance",
+        "content": "Meta's Llama 3.5 Challenges OpenAI's Dominance. Meta has unveiled Llama 3.5, its latest open-source large language model, directly competing with OpenAI's GPT series. Early benchmarks suggest Llama 3.5 offers comparable performance to GPT-4, potentially disrupting the generative AI market. This move intensifies the AI race, providing developers and businesses with a powerful, freely available alternative. The release underscores Meta's strategy to democratize AI and challenge proprietary models."
+      },
+      {
+        "name": "Google DeepMind Introduces Unified Robot Learning Platform",
+        "content": "Google DeepMind Introduces Unified Robot Learning Platform. Google DeepMind has launched a new unified platform designed to accelerate robot learning and development. The platform aims to standardize data collection and model training, making it easier for researchers to collaborate and build more capable robots. This initiative could significantly advance the field of robotics, enabling faster iteration and deployment of AI-powered automated systems across various industries."
+      },
+      {
+        "name": "Why AI Is a Storage Workload",
+        "content": "Why AI Is a Storage Workload. AI inference is becoming stateful infrastructure: long-context sessions, agents, RAG, and multimodal workflows create durable KV caches, prefixes, memories, and embeddings that are cheaper to store than recompute after enough reuse. The storage hierarchy is moving into the hot path, with HBM, DRAM, SSDs, object storage, CXL, and flash tiers shaping latency and cost."
+      },
+      {
+        "name": "How Kenn is doing Agentic Engineering",
+        "content": "How Kenn is doing Agentic Engineering. Kenn uses coding agents at high volume while keeping humans in control of design, review, and final decisions. Detailed specs, adversarial reviews, and continuous verification let three engineers ship hundreds of PRs weekly without relying on autonomous loops."
+      },
+      {
+        "name": "Z.ai releases GLM-5.3, a 743B coding model built for cybersecurity defense",
+        "content": "Z.ai releases GLM-5.3, a 743B coding model built for cybersecurity defense. GLM-5.3 adds 1M token context, doubles ExploitBench to 24.4%, cybersecurity gains were unplanned."
+      }
+    ],
+    "cards": [
+      {
+        "title": "🚀 Llama 3.5 של מטא מתחרה ב-OpenAI",
+        "source": "מקור: The Verge",
+        "brief": "מטא חשפה את Llama 3.5, מודל שפה גדול בקוד פתוח, המציג ביצועים דומים ל-GPT-4 לפי מדדי ביצועים ראשוניים. השקה זו מספקת אלטרנטיבה חזקה וזמינה ללא עלות למפתחים ולעסקים.",
+        "personalization": "עבורך, כמי שמתמקד ב-RAG וב-Multi-Agent Systems, זמינות של מודל קוד פתוח חזק כמו Llama 3.5 יכולה להוזיל עלויות ולספק גמישות רבה יותר בניסויים ובפריסה. שקול לשלב אותו בפרויקטים הבאים שלך, במיוחד אם אתה מעוניין לשמור על שליטה רבה יותר על התשתית או להתאים אישית את המודל."
+      },
+      {
+        "title": "💾 למה AI הוא עומס עבודה של אחסון",
+        "source": "מקור: TLDR Data",
+        "brief": "עם התפתחות RAG, סוכנים ו-long-context sessions, inferencing של AI הופך לתשתית מבוססת-מצב (stateful), הדורשת אחסון אופטימלי ל-KV caches, memories ו-embeddings. ארכיטקטורת האחסון הופכת למרכיב קריטי בביצועים ובעלות.",
+        "personalization": "כאדריכל RAG, עליך להבין שהביצועים והעלות של המערכות שלך תלויים ישירות באסטרטגיית האחסון. מחשבה על מיקום וסוג הנתונים (HBM, DRAM, SSDs, object storage) תשפיע על ה-latency ועל התקציב של מודלי ה-RAG וה-Multi-Agent שלך, לכן תכנן זאת מראש."
+      },
+      {
+        "title": "🧑‍💻 הנדסה אגנטית ב-Kenn: שליטה אנושית ואוטומציה",
+        "source": "מקור: Wes McKinney",
+        "brief": "חברת Kenn משתמשת בסוכני קידוד בקנה מידה גבוה, תוך שמירה על שליטה אנושית בתהליכי התכנון, הבדיקה וההחלטות הסופיות. גישה זו מאפשרת לשלושה מהנדסים לשלוח מאות PRs בשבוע ללא לולאות אוטונומיות לחלוטין.",
+        "personalization": "כשאתה בונה מערכות Multi-Agent, הגישה של Kenn מדגישה את החשיבות של Human-in-the-Loop. במקום לשאוף לאוטונומיה מוחלטת, התמקד בעיצוב תהליכים שבהם סוכנים מבצעים משימות שחוזרות על עצמן, אך בני אדם מפקחים ומאשרים, בדומה לאופן שבו אתה מנהל תהליכי פיתוח יומיומיים. זה רלוונטי במיוחד לבניית מערכות עם LangGraph."
+      },
+      {
+        "title": "🛡️ Z.ai משיקה את GLM-5.3: מודל קידוד לאבטחת סייבר",
+        "source": "מקור: AlphaSignal",
+        "brief": "חברת Z.ai שחררה את GLM-5.3, מודל קידוד בגודל 743B עם 1M token context, אשר תוכנן במקור להגנת סייבר. המודל הראה שיפור משמעותי במדדי אבטחת סייבר, למרות שלא זו הייתה מטרתו המרכזית.",
+        "personalization": "מודל עם יכולות קידוד חזקות ו-context של מיליון טוקנים הוא כלי רב עוצמה עבור משימות הנדסת AI. שקול כיצד מודל כזה יכול לשפר את יכולות סוכני הקידוד שלך או לסייע בניתוח וייצור קוד בתוך ארכיטקטורות RAG, גם אם אינך עוסק ישירות באבטחת סייבר. היכולת להחזיק context ארוך פותחת אפשרויות חדשות."
+      }
+    ],
+    "human_label": {
+      "score": 3,
+      "note": "3/5 (Unfaithful) - Card 4 (Z.ai). The brief adds \"למרות שלא זו הייתה מטרתו המרכזית\" (even though this was not its main goal). This is an LLM hallucination/interpolation attempting to explain the phrase \"cybersecurity gains were unplanned\", but it directly contradicts the source text which states the model was \"built for cybersecurity defense\". The judge correctly flagged this embellishment."
+    }
+  },
+  {
+    "run_ts": "20260822_070245",
+    "judge_original_score": 3,
+    "judge_original_reasoning": "Most claims are supported by the source articles, but one card brief contains a minor embellishment by reinterpreting 'graduated' as 'completion of an acceleration program' for Kubeflow.",
+    "sources": [
+      {
+        "name": "Mistral replaces one-shot document retrieval with a navigable search loop",
+        "content": "Mistral replaces one-shot document retrieval with a navigable search loop. Mistral has introduced an agentic search solution that moves beyond simple document retrieval, enabling large language models (LLMs) to engage in a continuous, navigable search process. This new approach allows LLMs to interact with search engines and adapt their queries based on initial results, mimicking a more human-like research workflow. The agentic search aims to provide more comprehensive and contextually relevant information by iteratively refining search strategies and synthesizing find"
+      },
+      {
+        "name": "CNCF Announces Kubeflow Graduation",
+        "content": "CNCF Announces Kubeflow Graduation. CNCF announced that Kubeflow, an open community-built ecosystem for standardizing data and AI workloads on Kubernetes, has graduated, confirming its technical maturity. The project now serves as an operational backbone for enterprises running AI training, fine-tuning, and inference in production, with nearly 260 million PyPI downloads."
+      },
+      {
+        "name": "AI-Infra-Guard (GitHub Repo)",
+        "content": "AI-Infra-Guard (GitHub Repo). Tencent Zhuque Lab has open-sourced AI-Infra-Guard (A.I.G), a red teaming platform for scanning AI infrastructure, MCP servers, agent skills, and testing large language models for jailbreak vulnerabilities."
+      },
+      {
+        "name": "TrueFoundry - Automate MLOps for 75% cost reduction",
+        "content": "TrueFoundry - Automate MLOps for 75% cost reduction. TrueFoundry offers an MLOps platform to streamline the deployment and management of machine learning models. By automating MLOps workflows, businesses can reduce operational costs by up to 75%. It supports various ML frameworks and provides tools for experiment tracking, model registry, and continuous integration/delivery."
+      },
+      {
+        "name": "PagedAttention: Virtual Memory for the KV Cache (15 minute read)",
+        "content": "PagedAttention: Virtual Memory for the KV Cache (15 minute read). PagedAttention is an approach that transfers concepts from virtual memory in operating systems to improve the efficiency of key-value (KV) cache management in LLMs. It reduces memory waste and improves throughput by using a shared pool of fixed-size physical blocks for memory allocation, allowing for better handling of concurrent requests in LLM serving."
+      }
+    ],
+    "cards": [
+      {
+        "title": "🔍 חיפוש סוכני: Mistral משפרת אחזור מסמכים",
+        "source": "מקור: TLDR AI",
+        "brief": "מיסטרל הציגה פתרון חיפוש סוכני חדשני, המאפשר ל-LLM לבצע תהליכי חיפוש מתמשכים וניתנים לניווט. גישה זו מאפשרת ל-LLM לקיים אינטראקציה עם מנועי חיפוש ולעדכן שאילתות על בסיס תוצאות ראשוניות.",
+        "personalization": "עבורך, כמי שבונה ארכיטקטורות RAG, זהו שדרוג קונספטואלי חשוב. במקום אחזור חד-פעמי, דמיין סוכן LangGraph שמבצע חיפושים איטרטיביים, משכלל את שאלתו ומסנתז מידע באופן דינמי, בדומה לאופן שבו מפתח חוקר בעיה. זה פותח דלתות ליכולות RAG מתקדמות יותר."
+      },
+      {
+        "title": "🚀 Kubeflow מסיימת את תוכנית ההאצה של CNCF",
+        "source": "מקור: TLDR DevOps",
+        "brief": "CNCF הכריזה על סיום תוכנית ההאצה של Kubeflow, מה שמאשר את בגרותה הטכנית כפלטפורמה אקולוגית פתוחה לתקנון עומסי עבודה של נתונים ו-AI ב-Kubernetes. הפרויקט משמש עמוד שדרה תפעולי להרצת אימון, כוונון עדין והסקה של AI בסביבות פרודקשן.",
+        "personalization": "אם אתם מתכננים להריץ מודלי LLM, סוכנים או יישומי RAG בקנה מידה גדול בפרודקשן, הבנת Kubeflow היא קריטית. היא מספקת את התשתית הנדרשת לניהול מחזור החיים המלא של ה-ML (MLOps) על גבי Kubernetes, ומאפשרת לכם להתמקד בבניית הלוגיקה העסקית של הסוכנים שלכם."
+      },
+      {
+        "title": "🛡️ AI-Infra-Guard: פלטפורמת Red Teaming לתשתית AI",
+        "source": "מקור: TLDR DevOps",
+        "brief": "מעבדת Tencent Zhuque פתחה קוד של AI-Infra-Guard (A.I.G), פלטפורמת Red Teaming לסריקת תשתית AI, שרתי MCP, יכולות סוכנים ובדיקת פגיעויות jailbreak במודלי שפה גדולים.",
+        "personalization": "כשאתה בונה סוכנים מרובי-משימות או מערכות RAG, אבטחה וחוסן הם קריטיים. הכלי הזה יכול לעזור לך לזהות חולשות, במיוחד בתשתית ה-AI שלך ובמנגנוני ה-prompting, ולמנוע פרצות אבטחה או התנהגויות בלתי צפויות של ה-LLM. זהו היבט חיוני בהפיכת מערכת AI למוצר."
+      },
+      {
+        "title": "🧠 PagedAttention: זיכרון וירטואלי עבור KV Cache",
+        "source": "מקור: TLDR Dev",
+        "brief": "PagedAttention מיישם עקרונות של זיכרון וירטואלי ממערכות הפעלה לשיפור יעילות ניהול זיכרון ה-KV Cache ב-LLMs. השיטה מפחיתה בזבוז זיכרון ומשפרת תפוקה על ידי שימוש במאגר משותף של בלוקים פיזיים בגודל קבוע.",
+        "personalization": "גם אם אינך מתעמק באופטימיזציה של פנימיות ה-LLM, הבנת PagedAttention חיונית להבנת איך מנועי הסקה (כמו vLLM) משיגים ביצועים גבוהים. כאשר אתה מעצב ארכיטקטורות RAG או Multi-Agent, בחירת מנוע הסקה יעיל תשפיע ישירות על מהירות התגובה ועלות ההרצה של היישומים שלך בפרודקשן."
+      }
+    ],
+    "human_label": {
+      "score": 3,
+      "note": "3/5 (Unfaithful) - Card 2 (Kubeflow). The brief translates and interprets \"Graduation\" as \"סיום תוכנית ההאצה\" (completion of an acceleration program). The source article only states that Kubeflow \"has graduated, confirming its technical maturity\", with no mention of an acceleration program. The LLM judge correctly flagged this translation-induced embellishment."
+    }
+  },
+  {
+    "run_ts": "20260824_070137",
+    "judge_original_score": 3,
+    "judge_original_reasoning": "While the first card is perfectly faithful, the second card includes minor embellishments such as stating that open-source LLMs 'offer strong alternatives for developers' and explicitly attributing a continued change to the Generative AI landscape to both Meta and Google's recent moves, which are inferences rather than directly stated facts in the source.",
+    "sources": [
+      {
+        "name": "OpenRouter: The Unified Interface for Every Model",
+        "content": "OpenRouter: The Unified Interface for Every Model. OpenRouter is the unified interface for every model: 500+ models from 80+ providers, processing 200T+ tokens monthly. Instead of hand-rolling routing logic and juggling provider keys, you route through OpenRouter once and let Auto Router pick the best execution path for every request — with automatic failover when providers degrade."
+      },
+      {
+        "name": "A Quick Tour to the Latest Open-Source LLMs From Google and Meta",
+        "content": "A Quick Tour to the Latest Open-Source LLMs From Google and Meta. Meta AI has been at the forefront of open-sourcing large language models (LLMs). The release of the Llama family of models changed the generative AI landscape. Google recently made a big splash in the LLM space by open-sourcing its new Gemma family of models."
+      },
+      {
+        "name": "A Data Engineering Perspective to the Data Quality Problem",
+        "content": "A Data Engineering Perspective to the Data Quality Problem. Data quality is a foundational piece in modern data architectures. Without high quality data, any data initiative is likely to fail regardless of how solid the infrastructure, how efficient the machine learning models, or how intuitive the data products might be. Poor data quality has been identified as a major source of friction and failures in enterprise data initiatives."
+      }
+    ],
+    "cards": [
+      {
+        "title": "🌐 OpenRouter: ממשק אחיד לכל מודל",
+        "source": "מקור: AlphaSignal",
+        "brief": "OpenRouter מספק ממשק אחיד ל-500+ מודלים מ-80+ ספקים, ומטפל ב-200T+ טוקנים בחודש. הוא מפשט את ניתוב הבקשות למודל האופטימלי עם Auto Router, כולל מנגנון גיבוי אוטומטי כאשר ספקים יורדים מהקו.",
+        "personalization": "בתור מפתח המעמיק ב-RAG ו-Multi-Agent Systems, OpenRouter חוסך לך זמן יקר בניהול API Key-ים ובבניית לוגיקת ניתוב מורכבת. הוא מאפשר לך להתמקד בארכיטקטורת ה-RAG שלך, כשהוא מטפל בבחירת ה-LLM המתאים ביותר לכל שלב, גם כשמחירי ספקים משתנים או שהם יורדים."
+      },
+      {
+        "title": "🧠 סקירה מהירה של LLM-ים פתוחי קוד מ-Google ומ-Meta",
+        "source": "מקור: TheSequence",
+        "brief": "Meta AI ו-Google פרסמו לאחרונה משפחות חדשות של מודלי שפה גדולים (LLM-ים) בקוד פתוח, ביניהן Llama ו-Gemma. מהלכים אלו ממשיכים לשנות את נוף ה-Generative AI ומציעים אלטרנטיבות חזקות למפתחים.",
+        "personalization": "ידע על LLM-ים פתוחי קוד כמו Llama ו-Gemma הוא קריטי לתכנון מערכות RAG ו-Multi-Agent. הם מאפשרים לך לבחון פתרונות מקומיים (on-premise) או עם שליטה רבה יותר, ופותחים אפשרויות לארכיטקטורות מותאמות אישית הדורשות פרטיות או ביצועים ספציפיים, במיוחד בשילוב עם frameworks כמו LangGraph."
+      }
+    ],
+    "human_label": {
+      "score": 3,
+      "note": "3/5 (Unfaithful) - Card 2 (סקירה מהירה). The brief adds that these models \"מציעים אלטרנטיבות חזקות למפתחים\" (offer strong alternatives for developers) and aggregates the impact of both companies as \"continuing to change the landscape\". These are logical inferences and standard industry knowledge, but they are absent from the provided source text. The LLM judge correctly applied the strict extraction rule and flagged these minor embellishments."
+    }
+  },
+  {
+    "run_ts": "20260812_070243",
+    "judge_original_score": 5,
+    "judge_original_reasoning": null,
+    "sources": [
+      {
+        "name": "Distilling Diffusion Models: Tiny, Fast, and High-Quality",
+        "content": "Distilling Diffusion Models: Tiny, Fast, and High-Quality. Diffusion models have revolutionized generative AI by producing high-quality images and content. However, their computational demands (training costs, inference latency) limit their real-time application and deployment on edge devices. This paper from Google Research proposes a method to distil large diffusion models into smaller, faster, and more efficient versions while preserving quality."
+      },
+      {
+        "name": "Webinar: Building Reliable Workflows and Agents with AI Coding Assistants (Sponsor)",
+        "content": "Webinar: Building Reliable Workflows and Agents with AI Coding Assistants (Sponsor). Modern business processes span APIs, services, and AI models, demanding reliable workflow coordination. Conductor is an open-source orchestration platform that manages these multi-step processes, tracking state and handling failures. This webinar shows how Conductor Skills let AI coding assistants like Claude Code and Cursor turn natural language into executable workflows, then evolve them into agentic workflows with AI decisions and human approvals. Register now for Wednesday, August 19th."
+      },
+      {
+        "name": "Token-maxxing is dead. Agentic memory is what comes next",
+        "content": "Token-maxxing is dead. Agentic memory is what comes next. Longer context windows alone aren't enough for agents that operate across hours or days. The emerging infrastructure challenge is persistent memory that can decide what information to retain, retrieve, and discard."
+      },
+      {
+        "name": "State of AI SDLC: A digital summit with Atlassian, Lovable, and DX (Sponsor)",
+        "content": "State of AI SDLC: A digital summit with Atlassian, Lovable, and DX (Sponsor). AI is reshaping how software gets planned, built, and run. Join State of AI SDLC, a free one-day digital summit, to hear how leading organizations are adopting AI across the software development lifecycle, improving developer productivity, and measuring AI's impact on engineering teams."
+      },
+      {
+        "name": "Why Enterprises Need a Multi-Model AI Strategy: Cost, Compliance, and Resilience (23 minute read)",
+        "content": "Why Enterprises Need a Multi-Model AI Strategy: Cost, Compliance, and Resilience (23 minute read). Enterprises are increasingly recognizing the need for a multi-model AI strategy to mitigate risks associated with vendor concentration, cost fluctuations, regulatory compliance, and operational resilience. By using multiple AI models and an orchestration layer, organizations can effectively manage workloads based on specific requirements while safeguarding against potential disruptions or legal constraints."
+      }
+    ],
+    "cards": [
+      {
+        "title": "🛠️ וובינר: בניית Workflows ואג'נטים אמינים עם AI Coding Assistants",
+        "source": "מקור: TLDR AI",
+        "brief": "וובינר זה מציג כיצד פלטפורמת Conductor בקוד פתוח משמשת לארכסטרה של תהליכים עסקיים הכוללים APIs, שירותים ומודלי AI. הוא מדגים כיצד Conductor Skills מאפשרת ל-AI coding assistants להפוך שפה טבעית ל-workflows הניתנים לביצוע ולפתח אותם ל-workflows סוכניים עם קבלת החלטות מבוססת AI ואישורים אנושיים.",
+        "personalization": "בתור מפתח המעמיק ב-Multi-Agent Systems, זה קריטי להבין ארכסטרה וניהול מצב. Conductor יכולה להיות תוספת חשובה לארסנל הכלים שלך, במיוחד כשאתה בונה מערכות מבוססות סוכנים. חשוב ללמוד איך לתכנן Agent flows שמשלבים קוד, APIs, ואינטראקציה אנושית בצורה יציבה."
+      },
+      {
+        "title": "🧠 זיכרון אג'נטי: מעבר מחלון קונטקסט ארוך לזיכרון מתמשך",
+        "source": "מקור: TLDR IT",
+        "brief": "מאמר זה טוען כי חלונות קונטקסט ארוכים אינם מספיקים לסוכנים הפועלים לאורך זמן, ומדגיש את הצורך בתשתית זיכרון מתמשכת. תשתית זו נדרשת לקבל החלטות אילו פיסות מידע לשמר, לאחזר ולזרוק עבור פעולות אג'נטיות.",
+        "personalization": "עבור ארכיטקטורות RAG ומערכות Multi-Agent, ניהול זיכרון הוא האתגר הבא. זה מחייב אותך לחשוב מעבר להזרקה פשוטה של קונטקסט: איך ה-Agent שלך יזכור דברים לאורך שיחות או משימות שונות? שקול לשלב טכניקות כמו זיכרון ארוך-טווח (long-term memory) וקבלת החלטות לגבי שימור מידע במערכות ה-RAG או LangGraph שלך."
+      },
+      {
+        "title": "📊 אסטרטגיית Multi-Model AI לארגונים: עלויות, תאימות וחוסן",
+        "source": "מקור: TLDR Dev",
+        "brief": "ארגונים רבים מאמצים אסטרטגיית Multi-Model AI כדי למתן סיכונים הקשורים בריכוז ספקים, תנודות עלויות, עמידה בתקנות וחוסן תפעולי. גישה זו מאפשרת ניהול עומסי עבודה באמצעות שכבת ארכסטרה תוך הגנה מפני הפרעות או מגבלות חוקיות.",
+        "personalization": "כאשר אתה בונה מערכות AI מורכבות, במיוחד בסביבה ארגונית, הבחירה במודל היא לא רק שאלה של ביצועים. חשוב להבין איך לשלב LLMs שונים (גם קטנים יותר) ולנהל אותם בשכבת ארכסטרה. זה רלוונטי במיוחד למערכות RAG בהן ייתכן שתרצה להשתמש במודלים שונים לשלבים שונים של התהליך, או אפילו להחליף מודלים בזמן ריצה."
+      },
+      {
+        "title": "🚀 פסגת AI SDLC: פיתוח תוכנה בעידן הבינה המלאכותית",
+        "source": "מקור: TLDR Dev",
+        "brief": "פסגה דיגיטלית זו בוחנת כיצד AI מעצבת מחדש את תהליכי תכנון, בנייה והרצה של תוכנה בארגונים. המשתתפים ילמדו כיצד ארגונים מובילים מאמצים AI לשיפור פרודוקטיביות המפתחים ומדידת השפעתה על צוותי הנדסה.",
+        "personalization": "כ-Software Engineer שמתמקד ב-AI Engineering, חשוב לך להבין לא רק את ה\"איך\" לבנות מערכות AI, אלא גם את ה\"איפה\" וה\"מתי\" הן משתלבות ב-SDLC. כנס כזה יכול לספק לך פרספקטיבה רחבה על הכלים והמתודולוגיות החדשות שמשפיעות על עבודתך, החל משילוב AI ב-CI/CD ועד לאופטימיזציה של תהליכי פיתוח."
+      }
+    ],
+    "human_label": {
+      "score": 5,
+      "note": "5/5"
+    }
+  },
+  {
+    "run_ts": "20260819_070406",
+    "judge_original_score": 5,
+    "judge_original_reasoning": null,
+    "sources": [
+      {
+        "name": "Qwen3.8 vs Qwen3.6 vs Gemma 4 on a 24GB GPU",
+        "content": "Qwen3.8 vs Qwen3.6 vs Gemma 4 on a 24GB GPU. A hands-on comparison tested three dense multimodal models under the same 24GB GPU constraint, including memory headroom at longer contexts. The measurements are useful, but Qwen3.8 was already covered, and the source's commercial independ"
+      },
+      {
+        "name": "Frontier Model Cost and Open-Weights Popularity is Driving Demand for Model Routing",
+        "content": "Frontier Model Cost and Open-Weights Popularity is Driving Demand for Model Routing. A recent trend in the AI infrastructure space is the increasing popularity of \"model routing.\" This refers to systems that automatically select and direct user queries to the most appropriate AI model from a pool of available options. This trend is primarily driven by two factors: the high cost of running large frontier models (like GPT-4) and the growing availability and quality of smaller, open-weight models (like Llama 3 or Mistral). By intelligently routing queries, organizations can optimiz"
+      },
+      {
+        "name": "Optimizing Machine Learning Pipelines with Distributed Computing",
+        "content": "Optimizing Machine Learning Pipelines with Distributed Computing. As machine learning models grow in complexity and data volumes increase, optimizing ML pipelines becomes critical for efficiency and scalability. This article explores how distributed computing frameworks can significantly accelerate training, inference, and data preprocessing stages. It delves into practical strategies for parallelizing computations across multiple nodes and GPUs."
+      },
+      {
+        "name": "Building Robust MLOps Platforms for Production-Ready AI",
+        "content": "Building Robust MLOps Platforms for Production-Ready AI. The journey from a prototype machine learning model to a reliable production system is often fraught with challenges. MLOps (Machine Learning Operations) aims to streamline this process, ensuring continuous integration, delivery, and deployment of ML applications. This piece focuses on the architectural patterns and best practices for building robust MLOps platforms."
+      },
+      {
+        "name": "The Role of Feature Stores in Modern Machine Learning Architectures",
+        "content": "The Role of Feature Stores in Modern Machine Learning Architectures. Feature engineering is a critical, often time-consuming, part of the machine learning workflow. As teams scale and models proliferate, managing, sharing, and serving features consistently across training and inference environments becomes a significant challenge. This article highlights the emerging role of feature stores in addressing these complexities."
+      }
+    ],
+    "cards": [
+      {
+        "title": "🛣️ ניתוב מודלים חכם: אופטימיזציה של עלויות וביצועים ב-AI",
+        "source": "מקור: Latent.Space",
+        "brief": "עלותם הגבוהה של מודלי שפה גדולים וזמינות מודלים פתוחים איכותיים מביאים לצמיחת מערכות \"ניתוב מודלים\". מערכות אלו מכוונות שאילתות באופן אוטומטי למודל ה-AI המתאים ביותר, בהתבסס על עלות, השהיה וביצועים.",
+        "personalization": "עבור ארכיטקטורות RAG מורכבות או מערכות Multi-Agent, היכולת לנתב שאילתות למודל ה-LLM האופטימלי היא קריטית לחיסכון בעלויות ולשיפור הביצועים. זהו רכיב ליבה שיאפשר לך לבנות מערכות חכמות ויעילות יותר, אולי באמצעות לוגיקה פנימית ב-LangGraph שתחליט איזה API של מודל להפעיל."
+      },
+      {
+        "title": "🚀 מינוף Distributed Computing לאופטימיזציה של ML Pipelines",
+        "source": "מקור: TheSequence",
+        "brief": "עם מודלי למידת מכונה מורכבים וקצב נתונים גובר, אופטימיציית ML pipelines חיונית ליעילות וסקאלביליות. המאמר בוחן כיצד פריימוורקים של distributed computing יכולים להאיץ אימון, הסקה ועיבוד נתונים מקדים.",
+        "personalization": "ככל שתתקדמו לבניית מערכות AI בקנה מידה גדול, בין אם ב-RAG או Multi-Agent, תיתקלו בצורך להאיץ תהליכים. הכרה ושימוש ב-distributed computing הם מיומנות מפתח שתאפשר לכם להתמודד עם נפחי נתונים ומודלים גדולים יותר, ותשפר את זמן הפיתוח והפריסה שלכם."
+      },
+      {
+        "title": "⚙️ MLOps: פריסת AI יציב ואמין לפרודקשן",
+        "source": "מקור: TheSequence",
+        "brief": "MLOps שואף לייעל את המעבר מפרוטוטייפ של מודל למידת מכונה למערכת ייצור אמינה, על ידי הבטחת אינטגרציה, אספקה ופריסה רציפה. המאמר מתמקד בדפוסי ארכיטקטורה ושיטות עבודה מומלצות לבניית פלטפורמות MLOps חזקות.",
+        "personalization": "בתור מהנדס AI, המעבר מפיתוח מקומי לפרודקשן הוא קריטי. MLOps הוא הגשר שיאפשר לכם להפוך רעיונות RAG או ארכיטקטורות Multi-Agent למערכות עובדות ואמינות בסביבת ייצור. הבנה טובה של MLOps תבטיח שהקוד שלכם לא רק עובד, אלא גם ניתן לתחזוקה, לניטור ולשדרוג."
+      },
+      {
+        "title": "📊 Feature Stores בארכיטקטורות למידת מכונה מודרניות",
+        "source": "מקור: TheSequence",
+        "brief": "הנדסת פיצ'רים (feature engineering) היא חלק קריטי וגוזל זמן בזרימת העבודה של למידת מכונה. המאמר מדגיש את תפקידם המתפתח של Feature Stores בניהול, שיתוף והגשת פיצ'רים באופן עקבי בסביבות אימון והסקה.",
+        "personalization": "למרות שהמיקוד המיידי שלך הוא ב-LLMs, RAG ו-Multi-Agent Systems, הבנת מושגים כמו Feature Stores חשובה למבט רחב יותר על עולם ה-ML Engineering. הוא פחות רלוונטי לליבת ה-LLM, אך חיוני כשאתה בונה מערכות היברידיות או מעמיק בתחומי ML מסורתיים שבהם סוכנים עשויים להשתמש בפיצ'רים מוגדרים."
+      }
+    ],
+    "human_label": {
+      "score": 5,
+      "note": "5/5"
+    }
+  }
+]

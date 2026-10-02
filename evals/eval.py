@@ -9,7 +9,7 @@ Evaluates three nodes without touching Gmail:
   3. dedupe_articles  — RAG deduplication correctness
 
 Run with:  python eval.py
-Results are printed as a table and saved to logs/eval_<timestamp>.json
+Results are printed as a table and saved to output/eval_<timestamp>.json
 """
 
 import json
@@ -18,15 +18,15 @@ import re
 from datetime import date, datetime
 
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 import google.auth
 from google import genai
 
-load_dotenv()
+import config.settings  # noqa: F401  (loads .env)
+from config.settings import OUTPUT_DIR
 
-from models import Article, NewsletterData
-from nodes import fillter_articles, summraize
-import article_store
+from modules.models import Article, NewsletterData
+from modules.nodes import fillter_articles, summraize
+from modules import article_store
 
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
@@ -480,9 +480,9 @@ def main() -> None:
 
     print_report(filter_results, newsletter_results, dedupe_results)
 
-    os.makedirs("logs", exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = f"logs/eval_{timestamp}.json"
+    log_path = OUTPUT_DIR / f"eval_{timestamp}.json"
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump(
             {"filter": filter_results, "newsletter": newsletter_results, "dedupe": dedupe_results},

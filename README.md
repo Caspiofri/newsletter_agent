@@ -76,7 +76,7 @@ The LLM is given a structured output schema (Pydantic → JSON) so the HTML rend
 
 ## Eval harness
 
-`eval.py` runs three nodes against fixture data — **no Gmail required** — and produces a quality report.
+`evals/eval.py` runs three nodes against fixture data — **no Gmail required** — and produces a quality report.
 
 **Fixture set:** 6 AI-engineering articles + 2 deliberately off-topic (startup funding, health study) to test filter discrimination.
 
@@ -105,13 +105,13 @@ The third eval suite covers the `dedupe` node — four cases: empty store passes
 Run it:
 
 ```bash
-python eval.py
-# Results printed as a table and saved to logs/eval_<timestamp>.json
+python -m evals.eval
+# Results printed as a table and saved to output/eval_<timestamp>.json
 ```
 
-### Live trace judging (`trace_judge.py`)
+### Live trace judging (`modules/trace_judge.py`)
 
-`eval.py` tests nodes in isolation against fixtures. `trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.
+`evals/eval.py` tests nodes in isolation against fixtures. `modules/trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.
 
 It scores three stages on a 1–5 scale:
 
@@ -121,7 +121,7 @@ It scores three stages on a 1–5 scale:
 | `filter_quality` | LLM judge | Whether the selected top-k articles are genuinely the most relevant to the configured subject |
 | `content_faithfulness` | LLM judge | Whether every factual claim in the generated cards is traceable to a source article — no hallucinated details |
 
-After each run the report is printed to stdout as a scored bar chart and saved to `logs/trace_<profile>_<timestamp>.json`:
+After each run the report is printed to stdout as a scored bar chart and saved to `output/trace_<profile>_<timestamp>.json`:
 
 ```json
 {
@@ -145,6 +145,15 @@ Every Gemini call is wrapped in **tenacity** — 3 retries with exponential back
 
 ---
 
+## Monitoring
+
+The pipeline runs unattended via cron (`0 7 * * *`, daily). Two layers catch failures:
+
+- **LangSmith tracing** — every graph run is traced end-to-end (`LANGCHAIN_TRACING` / `LANGCHAIN_PROJECT` in `.env`), so a run's node-by-node behavior is inspectable after the fact.
+- **healthchecks.io dead-man's-switch** — `main.py` pings `HEALTHCHECK_PING_URL` after every run: a plain ping on success, `/fail` (with the error or failed profile) on a crash, graph timeout, or `email_status == "failed"`. The check has a 60-minute grace period, so if the run never happens at all — for example the host machine is down — healthchecks.io alerts on the *missing* ping, which nothing running on the host itself could otherwise detect.
+
+---
+
 ## Tech stack
 
 | Layer | Choice | Why |
@@ -164,7 +173,7 @@ Every Gemini call is wrapped in **tenacity** — 3 retries with exponential back
 
 - Python 3.10+
 - Google Cloud project with Gmail API enabled
-- `credentials.json` (OAuth 2.0 Desktop App) from the Cloud Console
+- `config/credentials.json` (OAuth 2.0 Desktop App) from the Cloud Console
 - Gemini API key
 
 ### Install
@@ -183,7 +192,7 @@ cp .env.example .env
 
 ### First run — Gmail auth
 
-The first run opens a browser for OAuth consent and saves `token.json` for subsequent runs.
+The first run opens a browser for OAuth consent and saves `config/token.json` for subsequent runs.
 
 ```bash
 python main.py
@@ -194,14 +203,23 @@ python main.py
 ## Project structure
 
 ```
-├── main.py            # Entry point — invokes the compiled graph
-├── graph.py           # LangGraph node wiring and conditional edges
-├── nodes.py           # Node implementations (fetch, filter, dedupe, summarize, send)
-├── state.py           # DigestState TypedDict — shared across all nodes
-├── models.py          # Article, ArticleCard, NewsletterData Pydantic models
-├── gmail_client.py    # Gmail API wrapper (auth, read, send)
-├── article_store.py   # ChromaDB vector store — deduplication and article retention
-├── trace_judge.py     # Per-run LLM-as-judge with 3-stage scoring
-├── eval.py            # Offline eval harness — no Gmail needed
+├── main.py               # Entry point — invokes the compiled graph (cron runs this)
+├── modules/              # Application code
+│   ├── graph.py          # LangGraph node wiring and conditional edges
+│   ├── nodes.py          # Node implementations (fetch, extract, filter, dedupe, summarize, send)
+│   ├── state.py          # DigestState TypedDict — shared across all nodes
+│   ├── models.py         # Article, ArticleCard, NewsletterData Pydantic models
+│   ├── gmail_client.py   # Gmail API wrapper (auth, read, send)
+│   ├── link_utils.py     # Real-link extraction from email HTML, tracking unwrap, dead-link check
+│   ├── article_store.py  # ChromaDB vector store — deduplication and article retention
+│   └── trace_judge.py    # Per-run LLM-as-judge with 3-stage scoring
+├── config/               # settings.py (all paths) + credentials.json, token.json, service_account.json (git-ignored)
+├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json
+├── tests/                # Offline unit tests — python -m tests.test_link_utils
+├── data/                 # Runtime data: chroma_db/ (git-ignored)
+├── output/               # Logs, trace reports, eval reports (git-ignored)
+├── docs/                 # Screenshots
 └── requirements.txt
 ```
+
+Run everything from the repo root. All file locations come from `config/settings.py`, so the working directory no longer matters for data and credentials.

@@ -1,5 +1,5 @@
 from typing import TypedDict, Optional
-from models import Article, NewsletterData
+from modules.models import Article, NewsletterData
 
 
 class DigestState(TypedDict):

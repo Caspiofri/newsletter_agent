@@ -10,15 +10,13 @@ from email.utils import parsedate_to_datetime
 from googleapiclient.errors import HttpError
 import google.auth
 from google import genai
-from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from state import DigestState
-from models import Article, NewsletterData
-import gmail_client
-import article_store
+from modules.state import DigestState
+from modules.models import Article, NewsletterData
+from modules import gmail_client, article_store, link_utils
 
-load_dotenv()
+import config.settings  # noqa: F401  (loads .env)
 
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
@@ -70,23 +68,31 @@ def fetch_articles(state: DigestState) -> dict:
                         content=decoded_content,
                         url=url
                     ))
+                    break  # one HTML body per email is enough
     return {"articles": articles}
 
 
 def fillter_articles(state: DigestState) -> dict:
     articles = state["articles"]
-    top_k = state["top_k"]
-    if len(articles) <= int(top_k):
-        return {"top_articles": articles}
+    if not articles:
+        return {"top_articles": []}
 
+    top_k = int(state["top_k"])
     subject = state["subject"]
+    # Prefer stories with a working link; fall back to the full pool only if there are too few.
+    good = [a for a in articles if a.link_status == "ok"]
+    if len(good) >= top_k:
+        articles = good
     articles_meta = [
         {"name": a.name, "author": a.author, "published_at": str(a.published_at)}
         for a in articles
     ]
-    prompt = f"""You are a newsletter writer, you have these articles {json.dumps(articles_meta, ensure_ascii=False)} to
-    review, choose the top {top_k} articles for your newsletter writing, the articles
-    should be on the subject of {subject}.
+    prompt = f"""You are a newsletter writer for a digest about {subject}.
+    From these articles {json.dumps(articles_meta, ensure_ascii=False)}, select up to {top_k}
+    that are GENUINELY on the subject of {subject}.
+    EXCLUDE any article that is off-topic or only tangentially related — it is better to
+    return fewer articles (or none at all) than to include irrelevant ones.
+    If NONE of the articles are relevant to {subject}, return an empty array [].
     please return ONLY a JSON array of the selected article names, no extra text:
     ["article name 1", "article name 2", "article name 3"]
     """
@@ -122,6 +128,8 @@ _NEWSLETTER_CSS = """\
   .card-so-what .card-label { color: #3d5a80; }
   .read-more { display: inline-block; background: #2c3e50; color: #ffffff; font-size: 13px;
     font-weight: 600; padding: 8px 20px; border-radius: 6px; text-decoration: none; }
+  .read-more.disabled { background: #cbd5e0; color: #718096; cursor: not-allowed; }
+  .link-disabled { color: #a0aec0; font-size: 12px; }
   .brief-section { margin: 0 24px 20px 24px; padding: 16px 20px;
     border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
   .brief-section h2 { font-size: 15px; font-weight: 700; color: #2c3e50; margin-bottom: 12px; }
@@ -143,7 +151,19 @@ _NEWSLETTER_CSS = """\
 </style>"""
 
 
-def _render_html(data: NewsletterData, title: str, today: str) -> str:
+def _read_more(url: str, bad_urls) -> str:
+    if url in bad_urls:
+        return '<span class="read-more disabled">הקישור אינו זמין</span>'
+    return f'<a href="{url}" class="read-more">קרא עוד &larr;</a>'
+
+
+def _brief_link(url: str, bad_urls) -> str:
+    if url in bad_urls:
+        return '<span class="link-disabled">(הקישור אינו זמין)</span>'
+    return f'<a href="{url}">קרא עוד</a>'
+
+
+def _render_html(data: NewsletterData, title: str, today: str, bad_urls: frozenset = frozenset()) -> str:
     cards_html = ""
     if data.cards:
         cards_html += '  <div class="section-label" dir="rtl" style="text-align:right">🔥 עיקרי הגיליון</div>\n'
@@ -158,7 +178,7 @@ def _render_html(data: NewsletterData, title: str, today: str) -> str:
                 f'      <div class="card-label" dir="rtl" style="text-align:right">איך זה פוגש אותך</div>\n'
                 f'      <div class="card-body" dir="rtl" style="text-align:right">{card.personalization}</div>\n'
                 f'    </div>\n'
-                f'    <a href="{card.url}" class="read-more">קרא עוד &larr;</a>\n'
+                f'    {_read_more(card.url, bad_urls)}\n'
                 f'  </div>\n'
             )
 
@@ -166,7 +186,7 @@ def _render_html(data: NewsletterData, title: str, today: str) -> str:
     if data.brief_items:
         items = "\n".join(
             f'    <div class="brief-item" dir="rtl" style="text-align:right">'
-            f'{item.summary} — <a href="{item.url}">קרא עוד</a></div>'
+            f'{item.summary} — {_brief_link(item.url, bad_urls)}</div>'
             for item in data.brief_items
         )
         brief_html = (
@@ -288,7 +308,12 @@ INPUT ARTICLES:
 
     today = date.today().strftime('%d.%m.%Y')
     title = f"{newsletter_name} - {today}"
-    html = _render_html(data, title, today)
+    # A URL is "bad" if its source link was dead/unverifiable, or if the LLM returned one that was not in the input.
+    good_urls = {a.url for a in articles if a.link_status == "ok"}
+    bad_urls = frozenset(
+        u for u in [c.url for c in data.cards] + [b.url for b in data.brief_items] if u not in good_urls
+    )
+    html = _render_html(data, title, today, bad_urls)
 
     return {"summary": html, "newsletter_data": data}
 
@@ -321,24 +346,60 @@ def dedupe_articles(state: DigestState) -> dict:
     return {"top_articles": unseen}
 
 
+def _map_selection_to_articles(items: list, candidates: list[dict], email_article: Article) -> list[Article]:
+    """Turn the LLM's picks (candidate ids) into Articles. URLs come only from the email's real links."""
+    by_id = {c["id"]: c for c in candidates}
+    results, seen_urls = [], set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cand = by_id.get(item.get("id"))
+        title = str(item.get("title", "")).strip()
+        if cand is None or not title or cand["url"] in seen_urls:
+            continue
+        seen_urls.add(cand["url"])
+        results.append(Article(
+            name=title,
+            subject=email_article.subject,
+            author=email_article.author,
+            published_at=email_article.published_at,
+            content=str(item.get("snippet", "")).strip(),
+            url=cand["url"],
+        ))
+    return results
+
+
 def _extract_from_email(email_article: Article) -> list[Article]:
-    html_content = email_article.content[:20000]
-    prompt = f"""You are parsing a newsletter email HTML. Extract every individual article or story embedded in it.
+    candidates = link_utils.extract_candidate_links(email_article.content)
+    if not candidates:
+        return []
+    body_text = link_utils.email_plain_text(email_article.content)
+    candidates_json = json.dumps(
+        [{"id": c["id"], "text": c["text"], "context": c["context"]} for c in candidates],
+        ensure_ascii=False,
+    )
+    prompt = f"""You are parsing a newsletter email. Identify every individual article or story it links to.
 
-For each article found return:
+You are given the email's plain text and a numbered list of the links found in it. Choose ONLY from this list.
+For each article return:
+- "id": the id of the link that leads to that article (an integer from the list)
 - "title": the article headline (string)
-- "url": the DIRECT link to the article — must be a full https:// URL. Skip unsubscribe, mailto, tracking pixel, or social-icon links.
-- "snippet": 2-3 sentence plain-text summary of the article content
+- "snippet": 2-3 sentence plain-text summary, based only on the email text and link context
 
-Return ONLY a valid JSON array, no markdown, no commentary:
-[{{"title": "...", "url": "...", "snippet": "..."}}]
+Skip links that are ads, sponsors, unsubscribe, social, "read in app" duplicates of the same article, or navigation.
+Never invent an article that is not in the email. Return ONLY a valid JSON array, no markdown:
+[{{"id": 0, "title": "...", "snippet": "..."}}]
+If there are no real articles, return [].
 
-If no real articles are found, return [].
+EMAIL TEXT:
+{body_text}
 
-HTML:
-{html_content}"""
+LINKS:
+{candidates_json}"""
 
     text = _call_gemini(prompt)
+    if not text:
+        return []
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if not match:
         return []
@@ -346,27 +407,11 @@ HTML:
         items = json.loads(match.group())
     except json.JSONDecodeError:
         return []
-
-    results = []
-    for item in items:
-        url = item.get("url", "").strip()
-        title = item.get("title", "").strip()
-        snippet = item.get("snippet", "").strip()
-        if not url or not title:
-            continue
-        results.append(Article(
-            name=title,
-            subject=email_article.subject,
-            author=email_article.author,
-            published_at=email_article.published_at,
-            content=snippet,
-            url=url,
-        ))
-    return results
+    return _map_selection_to_articles(items, candidates, email_article)
 
 
 def extract_sub_articles(state: DigestState) -> dict:
-    """Explode each newsletter email into individual Article objects with real URLs."""
+    """Explode each newsletter email into individual Article objects with real, live URLs."""
     emails = state["articles"]
     all_sub_articles: list[Article] = []
 
@@ -375,7 +420,15 @@ def extract_sub_articles(state: DigestState) -> dict:
         for future in as_completed(futures):
             all_sub_articles.extend(future.result())
 
-    return {"articles": all_sub_articles}
+    status = link_utils.classify_links([a.url for a in all_sub_articles])
+    checked = [a.model_copy(update={"link_status": status[a.url]}) for a in all_sub_articles]
+    bad_before = sum(a.link_status != "ok" for a in checked)
+    upgraded = article_store.upgrade_bad_links(checked)
+    bad_after = sum(a.link_status != "ok" for a in upgraded)
+    if bad_before:
+        print(f"[extract] {bad_before} article(s) had a dead/unverifiable link; "
+              f"{bad_before - bad_after} replaced by a direct link from another newsletter, {bad_after} remain.")
+    return {"articles": upgraded}
 
 
 def expand_search(state: DigestState) -> dict:

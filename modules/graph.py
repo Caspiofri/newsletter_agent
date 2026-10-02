@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
-from state import DigestState
-import nodes
+from modules.state import DigestState
+from modules import nodes
 
 
 def check_fetch(state: DigestState) -> str:

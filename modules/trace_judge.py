@@ -10,7 +10,7 @@ Judges three stages:
   2. filter_quality   — did the LLM pick the right articles from what was fetched?
   3. content_quality  — faithfulness of the newsletter to the source articles
 
-Scores: 1–5 per stage. Saves report to logs/trace_<timestamp>.json.
+Scores: 1–5 per stage. Saves report to output/trace_<timestamp>.json.
 
 Usage:
   from trace_judge import judge_run
@@ -24,12 +24,12 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 
 import google.auth
-from dotenv import load_dotenv
 from google import genai
 
-from models import Article, NewsletterData
+from config.settings import OUTPUT_DIR
+from modules.models import Article, NewsletterData
 
-load_dotenv()
+
 
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 _client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
@@ -158,7 +158,13 @@ def _judge_filter_quality(
         stage="filter_quality",
         score=result["score"],
         reasoning=result["reasoning"],
-        details={"total_articles": len(all_names), "selected": len(selected_names)},
+        details={
+            "subject": subject,
+            "total_articles": len(all_names),
+            "selected": len(selected_names),
+            "all_articles": [{"name": a.name, "url": a.url} for a in articles],
+            "selected_articles": [{"name": a.name, "url": a.url} for a in top_articles],
+        },
     )
 
 
@@ -200,7 +206,15 @@ def _judge_content_faithfulness(
         stage="content_faithfulness",
         score=result["score"],
         reasoning=result["reasoning"],
-        details={"cards": len(newsletter_data.cards), "brief_items": len(newsletter_data.brief_items)},
+        details={
+            "cards": len(newsletter_data.cards),
+            "brief_items": len(newsletter_data.brief_items),
+            "source_articles": [{"name": a.name, "url": a.url, "content": a.content[:600]} for a in top_articles],
+            "generated_cards": [
+                {"title": c.title, "source": c.source, "brief": c.brief, "personalization": c.personalization, "url": c.url}
+                for c in newsletter_data.cards
+            ],
+        },
     )
 
 
@@ -211,7 +225,7 @@ def _judge_content_faithfulness(
 def judge_run(result: dict, profile: str) -> TraceReport:
     """
     Judge a completed pipeline run. Pass the dict returned by graph.ainvoke().
-    Saves a JSON report to logs/ and returns a TraceReport.
+    Saves a JSON report to output/ and returns a TraceReport.
     """
     stages = [
         _judge_fetch_health(
@@ -250,9 +264,9 @@ def judge_run(result: dict, profile: str) -> TraceReport:
 
 
 def _save(report: TraceReport) -> None:
-    os.makedirs("logs", exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = f"logs/trace_{report.profile.lower()}_{ts}.json"
+    path = OUTPUT_DIR / f"trace_{report.profile.lower()}_{ts}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(asdict(report), f, ensure_ascii=False, indent=2, default=str)
     print(f"  Trace report saved → {path}")

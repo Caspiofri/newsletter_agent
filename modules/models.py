@@ -10,6 +10,7 @@ class Article(BaseModel):
     content: str
     url: Optional[str] = None
     author: Optional[str] = None
+    link_status: str = "ok"  # "ok" | "dead" (404/410) | "unverified" (bot challenge, can't be checked)
 
 
 class ArticleCard(BaseModel):

@@ -1,16 +1,27 @@
 import asyncio
-from dotenv import load_dotenv
-from graph import graph
-import os.path
+import os
+import traceback
+import config.settings  # noqa: F401  (loads .env)
+from modules.graph import graph
+import requests
 
-import article_store
-import gmail_client
-import trace_judge
+from modules import article_store, trace_judge
 
 GRAPH_TIMEOUT = 600
+HEALTHCHECK_PING_URL = os.getenv("HEALTHCHECK_PING_URL")
 
 
-async def run_profile(profile: str):
+def _ping_healthcheck(ok: bool, message: str = ""):
+    if not HEALTHCHECK_PING_URL:
+        return
+    url = HEALTHCHECK_PING_URL if ok else f"{HEALTHCHECK_PING_URL}/fail"
+    try:
+        requests.post(url, data=message.encode("utf-8")[:10000], timeout=10)
+    except requests.RequestException as e:
+        print(f"[warn] Failed to ping healthcheck: {e}")
+
+
+async def run_profile(profile: str) -> str:
     state = {
         "gmail_label": os.getenv(f"{profile}_GMAIL_LABEL_ID"),
         "subject": os.getenv(f"{profile}_SUBJECT"),
@@ -42,7 +53,7 @@ async def run_profile(profile: str):
         )
     except asyncio.TimeoutError:
         print(f"\n[{profile}] Graph timed out after {GRAPH_TIMEOUT}s — no email sent.")
-        return
+        return "timeout"
 
     data = result.get("newsletter_data")
     if data:
@@ -62,12 +73,26 @@ async def run_profile(profile: str):
         print(f"\nNo articles found. Email status: {result['email_status']}")
 
     trace_judge.judge_run(result, profile)
+    return result["email_status"]
 
 
 async def main():
+    failures = []
     #for profile in ["AI", "MEDICAL"]:
     for profile in ["AI"]:
-        await run_profile(profile)
+        try:
+            status = await run_profile(profile)
+        except Exception:
+            print(f"\n[{profile}] Crashed:\n{traceback.format_exc()}")
+            failures.append(f"[{profile}] crashed:\n{traceback.format_exc()}")
+            continue
+        if status in ("failed", "timeout"):
+            failures.append(f"[{profile}] email_status={status}")
+
+    if failures:
+        _ping_healthcheck(ok=False, message="\n\n".join(failures))
+    else:
+        _ping_healthcheck(ok=True)
 
 
 asyncio.run(main())
