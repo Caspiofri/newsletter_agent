@@ -1,6 +1,6 @@
 """Offline tests for the Claude judge transport. Run from the repo root: python -m tests.test_judge_llm"""
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from modules import judge_llm as jl
 from modules import trace_judge
@@ -55,6 +55,35 @@ def test_hebrew_prompt_not_escaped():
     with patch.object(jl, "_get_client", return_value=client):
         jl.judge_llm(prompt)
     assert client.calls[0]["messages"][0]["content"] == prompt
+
+
+def test_real_client_builds_offline_with_messages():
+    import os
+    import anthropic
+    old_key = os.environ.get("ANTHROPIC_API_KEY")
+    old_cache = jl._client
+    os.environ["ANTHROPIC_API_KEY"] = "dummy-key-for-offline-test"
+    jl._client = None
+    try:
+        client = jl._get_client()
+        assert isinstance(client, anthropic.Anthropic)
+        assert hasattr(client, "messages")
+    finally:
+        jl._client = old_cache
+        if old_key is None:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+        else:
+            os.environ["ANTHROPIC_API_KEY"] = old_key
+
+
+def test_judge_llm_tags_current_run_with_model():
+    rt = MagicMock()
+    client = _FakeClient([_text("ok")])
+    with patch.object(jl, "_get_client", return_value=client), \
+            patch("langsmith.run_helpers.get_current_run_tree", return_value=rt):
+        jl.judge_llm.__wrapped__("p", model="m-9")  # bypass the traceable wrapper; patched run tree is a mock
+    rt.add_tags.assert_called_once_with(["m-9"])
+    rt.add_metadata.assert_called_once_with({"ls_provider": "anthropic", "ls_model_name": "m-9"})
 
 
 def test_llm_judge_passes_model_to_judge_llm():
