@@ -181,16 +181,16 @@ Every Gemini call is wrapped in **tenacity** — 3 retries with exponential back
 
 The pipeline runs unattended via cron (`0 7 * * *`, daily). Two layers catch failures:
 
-- **LangSmith tracing** — every graph run is traced end-to-end (`LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT` in `.env`), so a run's node-by-node behavior is inspectable after the fact.
+- **LangSmith tracing** — every graph run is traced end-to-end (`LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT` in `.env`; the legacy `LANGCHAIN_TRACING`, `LANGCHAIN_API_KEY` and `LANGCHAIN_PROJECT` names are still read by the SDK), so a run's node-by-node behavior is inspectable after the fact.
 - **healthchecks.io dead-man's-switch** — `main.py` pings `HEALTHCHECK_PING_URL` after every run: a plain ping on success, `/fail` (with the error or failed profile) on a crash, graph timeout, or `email_status == "failed"`. The check has a 60-minute grace period, so if the run never happens at all — for example the host machine is down — healthchecks.io alerts on the *missing* ping, which nothing running on the host itself could otherwise detect.
 
 ### What you can see in LangSmith
 
-- **One `digest_run` trace per day**, tagged `digest_run` and the profile. It contains the node runs, every `gemini` call, and the `trace_judge` / `judge_llm` calls.
-- **Feedback on that root run:** `judge.filter_quality`, `judge.content_faithfulness` and `judge.overall` (the judge's scores, with reasoning as the comment), plus `stat.<name>` for each pipeline stage count: `stat.merged`, `stat.after_dedupe`, `stat.dedupe_dropped`, `stat.shortlisted`, `stat.read_full`, `stat.read_partial`, `stat.read_snippet`, `stat.ranked`, `stat.picked`, `stat.cards`, `stat.brief_items`. Add the feedback keys as columns in the runs table.
+- **One `digest_run` trace per day**, tagged `digest_run` and the profile. It contains the node runs, every `gemini` call, and the `trace_judge` run. The Claude call is the run named `judge_llm` (run type `llm`), tagged with the judge model id.
+- **Feedback on that root run:** `judge.filter_quality`, `judge.content_faithfulness`, `judge.fetch_health` (always posted) and `judge.overall` (the judge's scores, with reasoning as the comment), plus `stat.<name>` for each pipeline stage count: `stat.merged`, `stat.after_dedupe`, `stat.dedupe_dropped`, `stat.shortlisted`, `stat.read_full`, `stat.read_partial`, `stat.read_snippet`, `stat.ranked`, `stat.picked`, `stat.cards`, `stat.brief_items`. Add the feedback keys as columns in the runs table.
 - **Root run metadata `run_summary`:** the picked titles, the ranker's scores and reasons for every candidate, and the dedupe drops.
 
-`stat.dedupe_dropped` counts every article the dedupe step removed, including duplicates within one batch. `run_summary.dedupe_drops` lists only matches against previously sent stories and near-misses, each with its similarity, the matched sent article and its send date; `dropped: true` means the similarity was at or above the threshold.
+`stat.dedupe_dropped` counts every article the dedupe step removed, including duplicates within one batch. `run_summary.dedupe_drops` lists only matches against previously sent stories and near-misses, each with its similarity, the matched sent article and its send date; `dropped: true` means the similarity was above the threshold.
 
 Prompts are recorded, so article and newsletter text is uploaded to LangSmith.
 
@@ -273,7 +273,7 @@ python main.py
 │   └── trace_judge.py    # Per-run LLM-as-judge with 3-stage scoring
 ├── config/               # settings.py (all paths) + credentials.json, token.json, service_account.json (git-ignored)
 ├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json, import_labels.py
-├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing (each via `python -m tests.<name>`)
+├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden (each via `python -m tests.<name>`)
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)
 ├── docs/                 # Screenshots
