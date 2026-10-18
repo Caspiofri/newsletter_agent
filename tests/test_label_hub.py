@@ -191,7 +191,8 @@ def test_js_build_export_has_exactly_label_fields_and_only_labeled():
     out = _run("buildExport(A.items, A.labels, 'hub_x')", {"items": items, "labels": labels})
     assert out["run_id"] == "hub_x" and len(out["labels"]) == 1
     row = out["labels"][0]
-    assert list(row) == label_hub.LABEL_FIELDS
+    assert list(row) == label_hub.LABEL_FIELDS + ["at"]   # `at` lets a loaded file be compared with local labels
+    assert isinstance(row["at"], (int, float)) and row["at"] > 0
     assert (row["url"], row["label"], row["tag"], row["labeled_with"], row["source_run"]) == ("u1", "must", "beginner", "article", "r1")
     assert row["ranker_score"] == 1 and row["ranker_picked"] is False
     default = _run("buildExport(A.items, A.labels, 'h').labels[0].labeled_with", {"items": items, "labels": {"u0": {"label": "skip"}}})
@@ -201,14 +202,38 @@ def test_js_build_export_has_exactly_label_fields_and_only_labeled():
 def test_js_merge_loaded_keeps_newer_local_label():
     if _node_missing():
         return
-    local = {"u1": {"label": "must", "at": 200}, "u2": {"label": "skip", "at": 100}}
-    loaded = {"labels": [{"url": "u1", "label": "skip"}, {"url": "u2", "label": "worth", "at": 300},
-                         {"url": "u3", "label": "worth", "tag": "hype", "note": "x"}, {"url": "u4", "label": "bogus"}]}
+    local = {"u1": {"label": "must", "at": 200}, "u2": {"label": "skip", "at": 100},
+             "u5": {"label": "skip", "at": 0},                      # seeded from the golden set
+             "u6": {"label": "must", "at": 500}, "u7": {"label": "worth"}}  # u7: no real timestamp
+    loaded = {"labels": [{"url": "u1", "label": "skip", "at": 150}, {"url": "u2", "label": "worth", "at": 300},
+                         {"url": "u3", "label": "worth", "tag": "hype", "note": "x", "at": 50},
+                         {"url": "u4", "label": "bogus"}, {"url": "u5", "label": "must", "at": 90},
+                         {"url": "u6", "label": "skip", "at": 500}, {"url": "u7", "label": "skip"}]}
     out = _run("mergeLoaded(A.labels, A.loaded)", {"labels": local, "loaded": loaded})
-    assert out["u1"]["label"] == "must"            # local, no timestamp on the loaded row
-    assert out["u2"]["label"] == "worth"           # loaded row is newer
-    assert out["u3"]["label"] == "worth" and out["u3"]["tag"] == "hype"
+    assert out["u1"]["label"] == "must"            # local is newer than the file
+    assert out["u2"]["label"] == "worth"           # file is newer
+    assert out["u3"]["label"] == "worth" and out["u3"]["tag"] == "hype"   # only in the file: added
     assert "u4" not in out
+    assert out["u5"]["label"] == "must"            # a golden-seeded label is not a newer local label
+    assert out["u6"]["label"] == "must"            # equal timestamps: local stays
+    assert out["u7"]["label"] == "skip"            # local without a real timestamp loses to the file
+    kept = _run("mergeLoaded(A.labels, {labels: []})", {"labels": local})
+    assert kept == local                            # only local: kept
+
+
+def test_js_unmatched_labels():
+    if _node_missing():
+        return
+    items = _items(3)
+    labels = {"u0": {"label": "must"}, "gone": {"label": "skip"}, "tagonly": {"tag": "promo"}, "u9": {"label": "worth"}}
+    out = _run("unmatchedLabels(A.items, A.labels)", {"items": items, "labels": labels})
+    assert sorted(out) == ["gone", "u9"]
+
+
+def test_hub_html_warns_about_unmatched_labels_and_resets_file_input():
+    html = _html()
+    assert "match no article in this page" in html and "python -m evals.canonicalize_labels" in html
+    assert "value = ''" in html  # file input reset, so loading the same file twice fires onchange
 
 
 def test_js_next_unlabeled():
@@ -227,6 +252,12 @@ def test_label_fields_row_is_accepted_by_import_merge():
     merged, added, updated = import_labels.merge([], {"run_id": "hub_1", "labels": [row]}, "2026-10-18")
     assert (added, updated) == (1, 0)
     assert merged[0]["source_run"] == "20261001_070000" and merged[0]["labeled_on"] == "2026-10-18"
+
+
+def test_import_drops_the_hub_timestamp():
+    exported = {"run_id": "hub_1", "labels": [{"url": "https://a", "label": "must", "at": 123}]}
+    merged, _, _ = import_labels.merge([], exported, "2026-10-18")
+    assert "at" not in merged[0]
 
 
 def test_import_keeps_row_source_run():

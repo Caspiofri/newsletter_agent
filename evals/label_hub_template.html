@@ -59,6 +59,7 @@
   <div class="row" id="counts"></div>
   <div id="warnings"></div>
   <div class="banner" id="unexported" hidden></div>
+  <div class="banner" id="unmatched" hidden></div>
   <div class="banner" id="nostore" hidden>Browser storage is blocked: your labels will not be remembered. Export before closing the page.</div>
   <div class="row">
     <label>Show <select id="f-status" onchange="applyAndRender()">
@@ -137,22 +138,30 @@ function buildExport(items, labels, runId) {
       url: it.url, title: it.title, label: l.label, tag: l.tag || '', note: l.note || '',
       labeled_with: l.labeled_with || 'snapshot', source_run: it.source_run || '', origin: it.origin, author: it.author,
       published_at: it.published_at, read_status: it.read_status, signal: it.signal, group: it.group,
-      ranker_picked: it.picked, ranker_score: it.score, content: it.content });
+      ranker_picked: it.picked, ranker_score: it.score, content: it.content,
+      at: l.at || Date.now() });  // when it was labeled (export time if unknown); import_labels drops it
   }
   return { run_id: runId, labels: out };
 }
 
-// a loaded export fills in labels; a local label stays unless the loaded row carries a newer "at"
+// a loaded export fills in labels; a local label stays only when this browser wrote it (a real, positive "at")
+// and the loaded row is not newer. Labels seeded from the golden set (at 0) or without a timestamp lose to the file.
 function mergeLoaded(labels, loaded) {
   const out = Object.assign({}, labels);
   for (const row of (loaded && loaded.labels) || []) {
     if (!row.url || LABEL_NAMES.indexOf(row.label) < 0) continue;
     const local = out[row.url];
-    if (local && local.label && (local.at || 0) >= (row.at || 0)) continue;
+    if (local && local.label && (local.at || 0) > 0 && local.at >= (row.at || 0)) continue;
     out[row.url] = { label: row.label, tag: row.tag || '', note: row.note || '',
                      labeled_with: row.labeled_with || 'snapshot', at: row.at || 0 };
   }
   return out;
+}
+
+// urls of labels that match no article in this page (old redirect links, other hub builds)
+function unmatchedLabels(items, labels) {
+  const known = new Set(items.map(it => it.url));
+  return Object.keys(labels).filter(u => labels[u] && labels[u].label && !known.has(u));
 }
 
 // index of the next unlabeled item after `from`, wrapping around; -1 when everything is labeled
@@ -240,6 +249,7 @@ function loadFile(file) {
     catch (e) { alert('Could not read that labels file: ' + e.message); }
   };
   r.readAsText(file);
+  $('load-file').value = '';  // so choosing the same file again still fires onchange
 }
 
 function updateProgress() {
@@ -249,6 +259,9 @@ function updateProgress() {
   const part = o => Object.entries(o).map(([k, v]) => k + ' ' + v).join(', ') || 'none';
   $('counts').textContent = 'labels: ' + part(s.byLabel) + ' | groups: ' + part(s.byGroup) + ' | origins: ' + part(s.byOrigin);
   $('warnings').replaceChildren(...s.warnings.map(w => el('div', 'banner', w)));
+  const lost = unmatchedLabels(D.items, labels).length;
+  $('unmatched').hidden = lost === 0;
+  $('unmatched').textContent = lost + ' loaded labels match no article in this page (their addresses may be old redirect links); run `python -m evals.canonicalize_labels` on the file first';
   const fresh = D.items.filter(it => labelOf(labels, it) && (labels[it.url].at || 0) > lastExport).length;
   const b = $('unexported'); b.hidden = fresh === 0;
   b.textContent = fresh + ' labels not exported yet' + (fresh >= 10 ? ': export now so nothing is lost' : '');

@@ -154,7 +154,9 @@ The page gathers every `output/ranking_*.json` (the newest report wins when an a
 python -m evals.import_labels ~/Downloads/ranking_labels_hub_<timestamp>.json
 ```
 
-Old exports from the per-run pages may hold Substack redirect URLs; run `python -m evals.canonicalize_labels <file>` once on each before importing, so those labels match the real article URLs the hub shows.
+If a loaded file holds labels that match no article in the page, a message says how many ("N loaded labels match no article in this page (their addresses may be old redirect links); run `python -m evals.canonicalize_labels` on the file first"). Old exports from the per-run pages may hold Substack redirect URLs; run `python -m evals.canonicalize_labels <file>` once on each before importing, so those labels match the real article URLs the hub shows.
+
+Manual check (no automated test covers the page itself): label three articles with `1`, `2`, `3` and move with `n`, `p`, `u`; confirm the shortcuts do not fire while typing in the note or choosing a tag; export; clear the browser's site data for the page; load the file and confirm every label returns; load the same file a second time (it works again, the page resets the file input).
 
 ### Live trace judging (`modules/trace_judge.py`)
 

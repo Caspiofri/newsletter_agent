@@ -22,8 +22,9 @@ def merge(golden: list[dict], exported: dict, today: str) -> tuple[list[dict], i
     for row in exported.get("labels", []):
         if row.get("label") not in VALID_LABELS or not row.get("url"):
             continue
+        # hub exports carry an "at" timestamp for the page's own merging; it is not part of the golden set
         # hub exports carry the report each row came from; per-run exports fall back to their own run_id
-        entry = {**row, "labeled_on": today, "source_run": row.get("source_run") or exported.get("run_id", "")}
+        entry = {**{k: v for k, v in row.items() if k != "at"}, "labeled_on": today, "source_run": row.get("source_run") or exported.get("run_id", "")}
         if row["url"] in by_url:
             updated += 1
         else:
