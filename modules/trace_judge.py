@@ -27,6 +27,7 @@ import google.auth
 from google import genai
 
 from config.settings import OUTPUT_DIR
+from modules.article_text import article_text
 from modules.models import Article, NewsletterData
 
 
@@ -184,12 +185,16 @@ def _judge_content_faithfulness(
             details={},
         )
 
-    source_summaries = "\n\n".join(
-        f"[{a.name}]: {a.content[:600]}" for a in top_articles
-    )
-    card_briefs = "\n\n".join(
-        f"Card '{c.title}': {c.brief}" for c in newsletter_data.cards
-    )
+    # the judge reads exactly the text the summarizer saw, paired per card
+    texts = [article_text(a) for a in top_articles]
+    sources = [f"[{a.name}] {a.subject}\n{t}" for a, t in zip(top_articles, texts)]
+    all_sources = "\n\n".join(sources)
+    pairs = []
+    for n, c in enumerate(newsletter_data.cards, 1):
+        has_source = c.id is not None and 0 <= c.id < len(sources)
+        source = sources[c.id] if has_source else all_sources
+        pairs.append(f"Card {n}: {c.brief}\n\nSource: {source}")
+    paired_content = "\n\n---\n\n".join(pairs)
 
     result = _llm_judge(
         criterion="Content faithfulness",
@@ -199,7 +204,7 @@ def _judge_content_faithfulness(
             "3 = most claims are supported, with minor embellishments.\n"
             "1 = multiple invented facts not present in the source articles."
         ),
-        content=f"Source articles:\n{source_summaries}\n\nGenerated card briefs:\n{card_briefs}",
+        content=paired_content,
     )
 
     return StageScore(
@@ -209,7 +214,7 @@ def _judge_content_faithfulness(
         details={
             "cards": len(newsletter_data.cards),
             "brief_items": len(newsletter_data.brief_items),
-            "source_articles": [{"name": a.name, "url": a.url, "content": a.content[:600]} for a in top_articles],
+            "source_articles": [{"name": a.name, "url": a.url, "content": t} for a, t in zip(top_articles, texts)],
             "generated_cards": [
                 {"title": c.title, "source": c.source, "brief": c.brief, "personalization": c.personalization, "url": c.url}
                 for c in newsletter_data.cards
