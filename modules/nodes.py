@@ -2,7 +2,6 @@ import os
 import re
 import base64
 import json
-from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from datetime import date
@@ -16,6 +15,8 @@ from modules.state import DigestState
 from config import settings
 from modules.collectors import hackernews, medium
 from modules.models import Article, NewsletterData
+from modules.article_text import article_text
+from modules.card_resolver import resolve_cards
 from modules import gmail_client, article_store, link_utils, ranking_report, reader
 
 
@@ -237,6 +238,15 @@ def _render_html(data: NewsletterData, title: str, today: str, bad_urls: frozens
     )
 
 
+def _sanitize_ids(parsed: dict) -> dict:
+    """Null any card/brief id that is not a real int (str, bool, float, missing) so resolve_cards drops it."""
+    for key in ("cards", "brief_items"):
+        for item in parsed.get(key) or []:
+            if isinstance(item, dict) and (isinstance(item.get("id"), bool) or not isinstance(item.get("id"), int)):
+                item["id"] = None
+    return parsed
+
+
 def summraize(state: DigestState):
     subject = state["subject"]
     target_audience = state["target_audience"]
@@ -245,11 +255,10 @@ def summraize(state: DigestState):
     experience_level = state["experience_level"]
     newsletter_name = state["digest_name"]
 
-    articles_plain = [
-        a.model_copy(update={
-            "content": BeautifulSoup(a.content, "html.parser").get_text(separator=" ", strip=True)[:2000]
-        })
-        for a in articles
+    # The model refers to articles by list index; resolve_cards maps each id back to the real URL.
+    articles_for_prompt = [
+        {"id": i, "title": a.subject, "origin": a.origin, "read_status": a.read_status, "text": article_text(a)}
+        for i, a in enumerate(articles)
     ]
 
     prompt = f"""You are a Senior Technical Newsletter Editor specializing in {subject}.
@@ -279,13 +288,13 @@ OUTPUT FORMAT:
       "source": "[SOURCE NAME]",
       "brief": "[1-2 sentence factual summary in Hebrew]",
       "personalization": "[2-3 sentences connecting to the reader's context in Hebrew]",
-      "url": "[URL]"
+      "id": <int, the "id" of the input article>
     }}
   ],
   "brief_items": [
     {{
       "summary": "[1-sentence Hebrew summary]",
-      "url": "[URL]"
+      "id": <int, the "id" of the input article>
     }}
   ],
   "actions": [
@@ -294,8 +303,8 @@ OUTPUT FORMAT:
   ]
 }}
 
-INPUT ARTICLES:
-{articles_plain}"""
+INPUT ARTICLES (use each article's "id" exactly as given):
+{json.dumps(articles_for_prompt, ensure_ascii=False)}"""
 
     text = _call_gemini(prompt, config={
         "max_output_tokens": 8000,
@@ -305,15 +314,12 @@ INPUT ARTICLES:
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if not match:
         raise ValueError(f"No JSON found in newsletter response: {text!r}")
-    data = NewsletterData(**json.loads(match.group()))
+    data = resolve_cards(NewsletterData(**_sanitize_ids(json.loads(match.group()))), articles)
 
     today = date.today().strftime('%d.%m.%Y')
     title = f"{newsletter_name} - {today}"
-    # A URL is "bad" if its source link was dead/unverifiable, or if the LLM returned one that was not in the input.
-    good_urls = {a.url for a in articles if a.link_status == "ok"}
-    bad_urls = frozenset(
-        u for u in [c.url for c in data.cards] + [b.url for b in data.brief_items] if u not in good_urls
-    )
+    # A URL is "bad" (rendered without a link) if its source link was dead/unverifiable or missing.
+    bad_urls = frozenset(a.url or "" for a in articles if a.link_status != "ok" or not a.url)
     html = _render_html(data, title, today, bad_urls)
 
     return {"summary": html, "newsletter_data": data}
