@@ -154,7 +154,7 @@ The page gathers every `output/ranking_*.json` (the newest report wins when an a
 python -m evals.import_labels ~/Downloads/ranking_labels_hub_<timestamp>.json
 ```
 
-If a loaded file holds labels that match no article in the page, a message says how many ("N loaded labels match no article in this page (their addresses may be old redirect links); run `python -m evals.canonicalize_labels` on the file first"). Old exports from the per-run pages may hold Substack redirect URLs; run `python -m evals.canonicalize_labels <file>` once on each before importing, so those labels match the real article URLs the hub shows.
+If a loaded file holds labels that match no article in the page, a message says how many ("N loaded labels match no article in this page (their addresses may be old redirect links); run `python -m evals.canonicalize_labels` on the file first"). Old exports from the per-run pages may hold Substack redirect URLs; run `python -m evals.canonicalize_labels <file>` once on each before importing, so those labels match the real article URLs the hub shows. Keep the original exported file after canonicalising: loaded labels that match no article stay only in the browser and are not exported.
 
 Manual check (no automated test covers the page itself): label three articles with `1`, `2`, `3` and move with `n`, `p`, `u`; confirm the shortcuts do not fire while typing in the note or choosing a tag; export; clear the browser's site data for the page; load the file and confirm every label returns; load the same file a second time (it works again, the page resets the file input).
 
@@ -209,7 +209,7 @@ The pipeline runs unattended via cron (`0 7 * * *`, daily). Two layers catch fai
 - **Feedback on that root run:** `judge.filter_quality`, `judge.content_faithfulness`, `judge.fetch_health` (always posted) and `judge.overall` (the judge's scores, with reasoning as the comment), plus one entry per pipeline stage counter: `count.articles_collected_merged`, `count.articles_after_dedupe`, `count.articles_dedupe_dropped`, `count.dedupe_matches`, `count.dedupe_near_misses`, `count.dedupe_batch_duplicates`, `metric.dedupe_max_similarity`, `count.articles_shortlisted`, `count.articles_read_full`, `count.articles_read_partial`, `count.articles_read_snippet`, `count.articles_ranked`, `count.final_picked_articles`, `count.cards`, `count.brief_items`. Counts are `count.*` and similarity measurements `metric.*`, so they are not read as judge scores. Old runs keep their `stat.*` feedback (LangSmith cannot rename it), so dashboards must use the new names from the first run after this change. Add the feedback keys as columns in the runs table.
 - **Root run metadata `run_summary`:** the picked titles, the ranker's scores and reasons for every candidate, and the dedupe drops.
 
-`count.articles_dedupe_dropped` counts every article the dedupe step removed, including duplicates within one batch. `count.dedupe_matches` and `count.dedupe_near_misses` count the matches at or above and just below the threshold, `count.dedupe_batch_duplicates` the duplicates within one batch, and `metric.dedupe_max_similarity` the highest similarity among the matches (0.0 when there are none). `run_summary.dedupe_drops` lists only matches against previously sent stories and near-misses, each with its similarity, the matched sent article and its send date; `dropped: true` means the similarity was above the threshold.
+`count.articles_dedupe_dropped` counts every article the dedupe step removed, including duplicates within one batch. `count.dedupe_matches` and `count.dedupe_near_misses` count the matches strictly above the threshold and the near-misses (between 0.70 and the threshold), `count.dedupe_batch_duplicates` the duplicates within one batch, and `metric.dedupe_max_similarity` the highest similarity among the matches (0.0 when there are none). `run_summary.dedupe_drops` lists only matches against previously sent stories and near-misses, each with its similarity, the matched sent article and its send date; `dropped: true` means the similarity was strictly above the threshold.
 
 Prompts are recorded, so article and newsletter text is uploaded to LangSmith.
 
@@ -292,7 +292,10 @@ python main.py
 │   └── trace_judge.py    # Per-run LLM-as-judge with 3-stage scoring
 ├── config/               # settings.py (all paths) + credentials.json, token.json, service_account.json (git-ignored)
 ├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json, import_labels.py
-├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden (each via `python -m tests.<name>`)
+│   ├── label_hub.py      # Labeling hub: one HTML page to grade articles from every ranking report (python -m evals.label_hub)
+│   ├── label_hub_template.html # The hub page (inline CSS/JS, pure-function logic tested through node)
+│   └── canonicalize_labels.py  # Rewrites redirect URLs in an exported labels file to the real article URLs
+├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden, test_canonicalize_labels, test_label_hub, test_reader_arxiv (each via `python -m tests.<name>`)
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)
 ├── docs/                 # Screenshots

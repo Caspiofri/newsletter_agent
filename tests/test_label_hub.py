@@ -77,6 +77,28 @@ def test_collect_items_title_origin_fallback_merges_redirect_variants():
         assert kept["label"] == "skip" and kept["source_run"] == "20261002_070000"
 
 
+def test_title_origin_fallback_needs_the_same_date():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d)
+        _write(out, "20261001_070000", [_row("https://a", title="Weekly", origin="inbox", published_at="2026-10-01"),
+                                        _row("https://c", title="Weekly", origin="inbox", published_at="2026-10-01")])
+        _write(out, "20261002_070000", [_row("https://b", title="Weekly", origin="inbox", published_at="2026-10-02"),
+                                        _row("https://c2", title="weekly", origin="inbox", published_at="2026-10-01")])
+        urls = sorted(i["url"] for i in label_hub.collect_items(out, out / "none.json"))
+        assert urls == ["https://b", "https://c2"], urls   # same title+origin+date merge; another date stays apart
+
+
+def test_collect_items_keeps_the_key_the_label_was_found_under():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d)
+        _write(out, "20261001_070000", [_row("https://old", title="Same", origin="Seq")])
+        _write(out, "20261002_070000", [_row("https://new", title="Same", origin="Seq")])
+        golden = out / "g.json"
+        _golden(golden, [{"url": "https://old", "label": "skip"}])
+        (item,) = label_hub.collect_items(out, golden)
+        assert item["url"] == "https://new" and item["label_url"] == "https://old"
+
+
 def test_item_text_is_html_stripped_and_capped():
     with tempfile.TemporaryDirectory() as d:
         out = Path(d)
@@ -221,6 +243,18 @@ def test_js_merge_loaded_keeps_newer_local_label():
     assert kept == local                            # only local: kept
 
 
+def test_js_build_export_has_replaces_url_only_when_different():
+    if _node_missing():
+        return
+    items = _items(3)
+    items[0]["label_url"] = "old-redirect"
+    items[1]["label_url"] = "u1"                       # same as url: no replaces_url
+    labels = {f"u{i}": {"label": "must"} for i in range(3)}
+    rows = _run("buildExport(A.items, A.labels, 'h').labels", {"items": items, "labels": labels})
+    assert rows[0]["replaces_url"] == "old-redirect"
+    assert "replaces_url" not in rows[1] and "replaces_url" not in rows[2]
+
+
 def test_js_unmatched_labels():
     if _node_missing():
         return
@@ -258,6 +292,48 @@ def test_import_drops_the_hub_timestamp():
     exported = {"run_id": "hub_1", "labels": [{"url": "https://a", "label": "must", "at": 123}]}
     merged, _, _ = import_labels.merge([], exported, "2026-10-18")
     assert "at" not in merged[0]
+
+
+def test_import_keeps_an_unchanged_row_entirely():
+    golden = [{"url": "https://a", "label": "must", "tag": "t", "note": "n", "labeled_with": "article",
+               "labeled_on": "2026-09-01", "source_run": "r0", "content": "old snapshot"}]
+    row = {"url": "https://a", "label": "must", "tag": "t", "note": "n", "labeled_with": "article",
+           "source_run": "r9", "content": "new text", "at": 5}
+    merged, added, updated = import_labels.merge(golden, {"run_id": "hub_1", "labels": [row]}, "2026-10-18")
+    assert (added, updated) == (0, 0) and merged == golden
+    changed = {**row, "label": "skip"}
+    merged, added, updated = import_labels.merge(golden, {"run_id": "hub_1", "labels": [changed]}, "2026-10-18")
+    assert (added, updated) == (0, 1)
+    assert merged[0]["label"] == "skip" and merged[0]["labeled_on"] == "2026-10-18" and "at" not in merged[0]
+
+
+def test_import_replaces_url_retires_the_old_key():
+    golden = [{"url": "https://old", "label": "skip", "labeled_on": "2026-09-01"},
+              {"url": "https://other", "label": "must", "labeled_on": "2026-09-01"}]
+    row = {"url": "https://new", "label": "skip", "replaces_url": "https://old", "at": 5}
+    merged, added, updated = import_labels.merge(golden, {"run_id": "hub_1", "labels": [row]}, "2026-10-18")
+    assert sorted(g["url"] for g in merged) == ["https://new", "https://other"]
+    assert (added, updated) == (0, 1)
+    assert all("replaces_url" not in g and "at" not in g for g in merged)
+
+
+def test_hub_round_trip_does_not_change_the_golden_row_count():
+    if _node_missing():
+        return
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d)
+        _write(out, "20261001_070000", [_row("https://old", title="Same", origin="Seq", published_at="2026-10-01"),
+                                        _row("https://b", title="B")])
+        _write(out, "20261002_070000", [_row("https://new", title="Same", origin="Seq", published_at="2026-10-01")])
+        golden = [{"url": "https://old", "label": "skip", "labeled_on": "2026-09-01"},
+                  {"url": "https://b", "label": "must", "labeled_on": "2026-09-01"}]
+        gp = out / "g.json"
+        _golden(gp, golden)
+        items = label_hub.collect_items(out, gp)
+        labels = {i["url"]: {"label": i["label"]} for i in items if i["label"]}
+        exported = _run("buildExport(A.items, A.labels, 'h')", {"items": items, "labels": labels})
+        merged, _, _ = import_labels.merge(golden, exported, "2026-10-18")
+        assert len(merged) == len(golden) == 2
 
 
 def test_import_keeps_row_source_run():

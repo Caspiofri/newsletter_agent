@@ -22,10 +22,21 @@ def merge(golden: list[dict], exported: dict, today: str) -> tuple[list[dict], i
     for row in exported.get("labels", []):
         if row.get("label") not in VALID_LABELS or not row.get("url"):
             continue
-        # hub exports carry an "at" timestamp for the page's own merging; it is not part of the golden set
-        # hub exports carry the report each row came from; per-run exports fall back to their own run_id
-        entry = {**{k: v for k, v in row.items() if k != "at"}, "labeled_on": today, "source_run": row.get("source_run") or exported.get("run_id", "")}
-        if row["url"] in by_url:
+        old = by_url.get(row["url"])
+        # an unchanged label keeps its original row (labeling date, source run, text snapshot)
+        if old and all(old.get(k, "") == row.get(k, "") for k in ("label", "tag", "note", "labeled_with")) \
+                and not row.get("replaces_url"):
+            continue
+        # "at" and "replaces_url" are hub-export bookkeeping, not golden-set fields; replaces_url names the
+        # older (redirect) address the label was stored under, which this row supersedes
+        retired = row.get("replaces_url")
+        entry = {**{k: v for k, v in row.items() if k not in ("at", "replaces_url")}, "labeled_on": today,
+                 # hub exports carry the report each row came from; per-run exports fall back to their own run_id
+                 "source_run": row.get("source_run") or exported.get("run_id", "")}
+        if retired and retired != row["url"] and retired in by_url:
+            del by_url[retired]
+            old = old or True
+        if old:
             updated += 1
         else:
             added += 1

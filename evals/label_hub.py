@@ -54,11 +54,13 @@ def collect_items(output_dir: Path, golden_path: Path) -> list[dict]:
         golden = {g["url"]: g for g in json.loads(golden_path.read_text(encoding="utf-8")) if g.get("url")}
 
     # the same article under two URLs (e.g. a Substack redirect and the real post): keep the newest copy
+    # (origin is "inbox" for every newsletter story, so the date has to match too)
     groups: dict[tuple, list[dict]] = {}
     for it in by_url.values():
-        groups.setdefault((_norm(it.get("title")), _norm(it.get("origin"))), []).append(it)
+        key = (_norm(it.get("title")), _norm(it.get("origin")), str(it.get("published_at", "")))
+        groups.setdefault(key, []).append(it)
     items = []
-    for (title, _), copies in groups.items():
+    for (title, _, _), copies in groups.items():
         if not title or len(copies) == 1:
             items.extend(copies)
             continue
@@ -67,8 +69,9 @@ def collect_items(output_dir: Path, golden_path: Path) -> list[dict]:
         items.append({**keep, "_label_url": labeled["url"]})
 
     for it in items:
-        g = golden.get(it.pop("_label_url", it["url"]), {})
-        it.update(label=g.get("label", ""), tag=g.get("tag", ""), note=g.get("note", ""),
+        label_url = it.pop("_label_url", it["url"])
+        g = golden.get(label_url, {})
+        it.update(label_url=label_url if g else "", label=g.get("label", ""), tag=g.get("tag", ""), note=g.get("note", ""),
                   labeled_with=g.get("labeled_with", ""), content=_text(it.get("content", "")))
     items.sort(key=lambda i: i["source_run"], reverse=True)
     items.sort(key=lambda i: bool(i["label"]))  # stable: unlabeled first, newest report first within each

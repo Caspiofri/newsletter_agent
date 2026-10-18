@@ -140,6 +140,8 @@ function buildExport(items, labels, runId) {
       published_at: it.published_at, read_status: it.read_status, signal: it.signal, group: it.group,
       ranker_picked: it.picked, ranker_score: it.score, content: it.content,
       at: l.at || Date.now() });  // when it was labeled (export time if unknown); import_labels drops it
+    // the golden set holds this label under an older address (a redirect): the import retires that row
+    if (it.label_url && it.label_url !== it.url) out[out.length - 1].replaces_url = it.label_url;
   }
   return { run_id: runId, labels: out };
 }
