@@ -68,7 +68,7 @@ def _run_graph(inbox: list[Article]):
         send_email=lambda s: {"email_status": "success"},
     )
     with patch.multiple(nodes, **stubs), \
-         patch("modules.link_utils.classify_links", side_effect=lambda urls: {u: "ok" for u in urls}):
+         patch("modules.link_utils.resolve_links", side_effect=lambda urls: {u: ("ok", u) for u in urls}):
         from modules import graph as graph_mod
         graph_mod = importlib.reload(graph_mod)
         state = {"subject": "AI", "tries": 0, "max_tries": 3, "days_back": 1, "max_days_back": 2,
@@ -94,10 +94,35 @@ def test_merge_dedupes_by_url():
     from modules import nodes
     pool = {"articles": [_art("A", "https://x.example/1", "inbox")],
             "extra_articles": [_art("A again", "https://x.example/1", "medium"), _art("B", "https://x.example/2", "medium")]}
-    with patch("modules.link_utils.classify_links", side_effect=lambda urls: {u: "ok" for u in urls}):
+    with patch("modules.link_utils.resolve_links", side_effect=lambda urls: {u: ("ok", u) for u in urls}):
         out = nodes.merge_sources(pool)["articles"]
     assert [a.url for a in out] == ["https://x.example/1", "https://x.example/2"]
     assert out[0].origin == "inbox"  # first source wins
+
+
+def test_merge_collapses_two_redirects_to_one_article():
+    from modules import nodes
+    r1, r2 = "https://substack.com/redirect/1/a", "https://substack.com/redirect/2/b"
+    real = "https://x.substack.com/p/post"
+    pool = {"articles": [_art("A", r1, "inbox")],
+            "extra_articles": [_art("A again", r2, "inbox"), _art("B", "https://x.example/2", "medium")]}
+    resolved = {r1: ("ok", real + "?utm_source=a"), r2: ("ok", real + "?utm_source=b"), "https://x.example/2": ("ok", "https://x.example/2")}
+    with patch("modules.link_utils.resolve_links", return_value=resolved), \
+         patch("modules.article_store.upgrade_bad_links", side_effect=lambda a: a):
+        out = nodes.merge_sources(pool)
+    assert [a.url for a in out["articles"]] == [real, "https://x.example/2"]
+    assert out["articles"][0].name == "A"  # first seen wins
+    assert out["run_stats"] == {"merged": 2}
+
+
+def test_merge_keeps_status_dead_with_canonical_url():
+    from modules import nodes
+    r1 = "https://substack.com/redirect/1/a"
+    pool = {"articles": [_art("A", r1, "inbox")], "extra_articles": []}
+    with patch("modules.link_utils.resolve_links", return_value={r1: ("dead", "https://x.example/gone?ref=1")}), \
+         patch("modules.article_store.upgrade_bad_links", side_effect=lambda a: a):
+        out = nodes.merge_sources(pool)["articles"]
+    assert out[0].url == "https://x.example/gone" and out[0].link_status == "dead"
 
 
 def test_reader_statuses():

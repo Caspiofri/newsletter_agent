@@ -181,7 +181,7 @@ def test_run_stats_accumulate_across_nodes():
 
 def test_merge_starts_fresh_run_stats():
     arts = [_art("A"), _art("A"), _art("B")]
-    with patch.object(nodes.link_utils, "classify_links", side_effect=lambda urls: {u: "ok" for u in urls}), \
+    with patch.object(nodes.link_utils, "resolve_links", side_effect=lambda urls: {u: ("ok", u) for u in urls}), \
             patch.object(nodes.article_store, "upgrade_bad_links", side_effect=lambda a: a):
         out = nodes.merge_sources({"articles": arts[:1], "extra_articles": arts[1:], "run_stats": {"stale": 9}})
     assert out["run_stats"] == {"merged": 2}

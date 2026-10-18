@@ -66,6 +66,54 @@ def test_check_link_classification():
         assert link_utils.check_link("https://x.example") == "ok"
 
 
+SUB = "https://substack.com/redirect/2/abc?j=eyJ"
+
+
+def test_canonical_url_substack_redirect_uses_final_url():
+    final = "https://thesequence.substack.com/p/real-post?utm_source=email&utm_medium=x#comments"
+    assert link_utils.canonical_url(SUB, final) == "https://thesequence.substack.com/p/real-post"
+    assert link_utils.canonical_url("https://www.substack.com/redirect/9/z", "https://a.example/p") == "https://a.example/p"
+
+
+def test_canonical_url_strips_tracking_params_and_fragment():
+    url = "https://a.example/p?utm_campaign=c&id=7&fbclid=f&gclid=g&mc_cid=1&mc_eid=2&_hsenc=h&_hsmi=m&ref=r&source=s#top"
+    assert link_utils.canonical_url(url, url) == "https://a.example/p?id=7"
+    # a non-redirector keeps its own address even if the final url differs
+    assert link_utils.canonical_url("https://a.example/p?utm_source=x", "https://b.example/q") == "https://a.example/p"
+
+
+def test_canonical_url_keeps_original_when_request_failed():
+    assert link_utils.canonical_url(SUB, SUB) == SUB
+    assert link_utils.canonical_url(SUB, "") == SUB
+
+
+def test_canonical_url_keeps_other_params():
+    final = "https://a.example/p?z=1&utm_source=x&a=2&b=3"
+    assert link_utils.canonical_url(SUB, final) == "https://a.example/p?z=1&a=2&b=3"
+
+
+def test_check_link_unchanged_statuses():
+    with patch("modules.link_utils.requests.get", return_value=_resp(404)):
+        assert link_utils.check_link("https://x.example") == "dead"
+    with patch("modules.link_utils.requests.get", side_effect=link_utils.requests.ConnectionError()):
+        assert link_utils.check_link("https://x.example") == "ok"
+
+
+def test_resolve_link_returns_final_url():
+    resp = _resp(200)
+    resp.url = "https://real.example/post"
+    with patch("modules.link_utils.requests.get", return_value=resp):
+        assert link_utils.resolve_link(SUB) == ("ok", "https://real.example/post")
+    with patch("modules.link_utils.requests.get", side_effect=link_utils.requests.ConnectionError()):
+        assert link_utils.resolve_link(SUB) == ("ok", SUB)
+    dead = _resp(404)
+    dead.url = "https://real.example/gone"
+    with patch("modules.link_utils.requests.get", return_value=dead):
+        assert link_utils.resolve_link(SUB) == ("dead", "https://real.example/gone")
+    with patch("modules.link_utils.resolve_link", side_effect=lambda u: ("ok", u + "/f")):
+        assert link_utils.resolve_links(["a", "a", "b"]) == {"a": ("ok", "a/f"), "b": ("ok", "b/f")}
+
+
 def _art(name, url, status="ok", content=""):
     return Article(subject="s", name=name, published_at=date.today(), content=content, url=url, link_status=status)
 

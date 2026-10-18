@@ -579,15 +579,26 @@ def collect_hackernews(state: DigestState) -> dict:
 
 
 def merge_sources(state: DigestState) -> dict:
-    """Join point for all collectors: de-duplicate by URL, check every link, swap bad links for direct ones."""
+    """Join point for all collectors: de-duplicate by URL, resolve every link to its canonical URL (and de-duplicate again), swap bad links for direct ones."""
     pool = list(state["articles"]) + list(state["extra_articles"])
     by_url = {}
     for a in pool:
         by_url.setdefault(a.url, a)
     articles = list(by_url.values())
 
-    status = link_utils.classify_links([a.url for a in articles])
-    checked = [a.model_copy(update={"link_status": status[a.url]}) for a in articles]
+    resolved = link_utils.resolve_links([a.url for a in articles])
+    canon, checked, seen = 0, [], set()
+    for a in articles:
+        status, final = resolved[a.url]
+        url = link_utils.canonical_url(a.url, final)
+        canon += url != a.url
+        if url in seen:  # two redirects (or tracking variants) of one article: keep the first
+            continue
+        seen.add(url)
+        checked.append(a.model_copy(update={"url": url, "link_status": status}))
+    collapsed = len(articles) - len(checked)
+    if canon or collapsed:
+        print(f"[merge] {canon} URL(s) canonicalised, {collapsed} article(s) collapsed into a duplicate.")
     bad_before = sum(a.link_status != "ok" for a in checked)
     upgraded = article_store.upgrade_bad_links(checked)
     bad_after = sum(a.link_status != "ok" for a in upgraded)
