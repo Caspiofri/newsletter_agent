@@ -12,15 +12,15 @@ that's a signal the prompt, rubric, or underlying model changed behavior.
 Golden set: golden_set.json (built from output/trace_ai_*.json + Chroma +
 Gmail Sent, hand-labeled — see golden_set_candidates.md for provenance).
 
-Run with:  python eval_golden.py
-Results are printed as a table and saved to output/eval_golden_<timestamp>.json
+Run with:  python -m evals.eval_golden [--model <id>|eval|daily]
+Results are printed as a table and saved to output/eval_golden_<model>_<timestamp>.json
 """
 
+import argparse
 import json
-import os
 from datetime import date, datetime
 
-from config.settings import GOLDEN_SET_PATH, OUTPUT_DIR
+from config.settings import GOLDEN_SET_PATH, JUDGE_MODEL_DAILY, JUDGE_MODEL_EVAL, OUTPUT_DIR
 from modules.models import Article, ArticleCard, NewsletterData
 from modules.trace_judge import _judge_content_faithfulness
 
@@ -61,7 +61,16 @@ def _to_newsletter_data(cards: list[dict]) -> NewsletterData:
     )
 
 
-def run_golden_eval() -> dict:
+def _resolve_model(model: str | None) -> str:
+    if model is None or model == "daily":
+        return JUDGE_MODEL_DAILY
+    if model == "eval":
+        return JUDGE_MODEL_EVAL
+    return model
+
+
+def run_golden_eval(model: str | None = None) -> dict:
+    model = _resolve_model(model)
     cases = _load_golden_set()
     results = []
 
@@ -69,7 +78,7 @@ def run_golden_eval() -> dict:
         top_articles = _to_top_articles(case["sources"])
         newsletter_data = _to_newsletter_data(case["cards"])
 
-        judged = _judge_content_faithfulness(top_articles, newsletter_data)
+        judged = _judge_content_faithfulness(top_articles, newsletter_data, model=model)
         human_score = case["human_label"]["score"]
         judge_score = judged.score
 
@@ -80,6 +89,7 @@ def run_golden_eval() -> dict:
             "human_score": human_score,
             "human_note": case["human_label"]["note"],
             "judge_score": judge_score,
+            "original_judge_score": case.get("judge_original_score"),
             "judge_reasoning": judged.reasoning,
             "agree": agree,
         })
@@ -87,6 +97,7 @@ def run_golden_eval() -> dict:
     agreement_count = sum(1 for r in results if r["agree"])
     return {
         "timestamp": datetime.now().isoformat(),
+        "model": model,
         "tolerance": AGREEMENT_TOLERANCE,
         "cases": results,
         "agreement_rate": agreement_count / len(results) if results else 0.0,
@@ -96,10 +107,11 @@ def run_golden_eval() -> dict:
 def print_report(report: dict) -> None:
     print("\n" + "=" * 62)
     print("  GOLDEN SET EVAL — content_faithfulness judge vs. human labels")
+    print(f"  model: {report['model']}")
     print("=" * 62)
     for r in report["cases"]:
         status = "AGREE" if r["agree"] else "DRIFT"
-        print(f"\n  [{status}] {r['run_ts']}   human={r['human_score']}/5  judge={r['judge_score']}/5")
+        print(f"\n  [{status}] {r['run_ts']}   human={r['human_score']}/5  judge={r['judge_score']}/5  original={r['original_judge_score']}/5")
         print(f"    human note:  {r['human_note'][:120]}")
         print(f"    judge said:  {r['judge_reasoning'][:120]}")
     print(f"\n  Agreement rate (±{report['tolerance']}): {report['agreement_rate']*100:.0f}% "
@@ -108,13 +120,18 @@ def print_report(report: dict) -> None:
 
 
 def main() -> None:
-    print("Running golden set eval (content_faithfulness judge)...")
-    report = run_golden_eval()
+    parser = argparse.ArgumentParser(description="Golden set eval for the content_faithfulness judge")
+    parser.add_argument("--model", default=None, help="judge model id, or 'eval' / 'daily' (default: daily)")
+    args = parser.parse_args()
+
+    model = _resolve_model(args.model)
+    print(f"Running golden set eval (content_faithfulness judge, model={model})...")
+    report = run_golden_eval(model)
     print_report(report)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"eval_golden_{ts}.json"
+    path = OUTPUT_DIR / f"eval_golden_{model}_{ts}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2, default=str)
     print(f"Report saved → {path}")
