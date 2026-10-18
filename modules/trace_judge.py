@@ -22,6 +22,8 @@ import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
+from langsmith import traceable
+
 from config.settings import JUDGE_MODEL_DAILY, OUTPUT_DIR
 from modules.article_text import article_text
 from modules.judge_llm import judge_llm, parse_judge_json
@@ -213,6 +215,7 @@ def _judge_content_faithfulness(
 # Public API
 # ---------------------------------------------------------------------------
 
+@traceable(name="trace_judge")
 def judge_run(result: dict, profile: str) -> TraceReport:
     """
     Judge a completed pipeline run. Pass the dict returned by graph.ainvoke().

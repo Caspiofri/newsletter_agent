@@ -9,6 +9,7 @@ from email.utils import parsedate_to_datetime
 from googleapiclient.errors import HttpError
 import google.auth
 from google import genai
+from langsmith import traceable
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from modules.state import DigestState
@@ -25,6 +26,7 @@ client = genai.Client(vertexai=True, project=_project, location="us-central1", c
 gmail = gmail_client.GmailClient()
 
 
+@traceable(run_type="llm", name="gemini")
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_gemini(contents: str, config: dict | None = None) -> str:
     response = client.models.generate_content(

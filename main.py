@@ -4,8 +4,10 @@ import traceback
 from config import settings  # also loads .env
 from modules.graph import graph
 import requests
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
-from modules import article_store, trace_judge
+from modules import article_store, tracing
 
 GRAPH_TIMEOUT = 600
 HEALTHCHECK_PING_URL = os.getenv("HEALTHCHECK_PING_URL")
@@ -26,6 +28,7 @@ def _env_list(name: str, default: list[str]) -> list[str]:
     return [x.strip() for x in raw.split(",") if x.strip()] if raw else list(default)
 
 
+@traceable(name="digest_run")
 async def run_profile(profile: str) -> str:
     state = {
         "gmail_label": os.getenv(f"{profile}_GMAIL_LABEL_ID"),
@@ -53,6 +56,12 @@ async def run_profile(profile: str) -> str:
         "days_back": 1,
         "max_days_back": 7,
     }
+    rt = get_current_run_tree()  # None when LANGSMITH_TRACING is off
+    if rt is not None:
+        try:
+            rt.add_tags(["digest_run", profile])
+        except Exception as e:
+            print(f"[warn] Failed to tag LangSmith run: {e}")
     db_profile = os.getenv(f"{profile}_DIGEST_NAME", profile).lower().replace(" ", "_")
     purged = article_store.purge_old(db_profile)
     if purged:
@@ -84,7 +93,7 @@ async def run_profile(profile: str) -> str:
     else:
         print(f"\nNo articles found. Email status: {result['email_status']}")
 
-    trace_judge.judge_run(result, profile)
+    tracing.judge_and_post(result, profile, rt)
     return result["email_status"]
 
 
