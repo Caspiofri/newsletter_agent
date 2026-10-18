@@ -2,8 +2,9 @@ import os
 import re
 import base64
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
+from langsmith.utils import ContextThreadPoolExecutor as ThreadPoolExecutor  # copies trace context into workers
 from datetime import date
 from email.utils import parsedate_to_datetime
 from googleapiclient.errors import HttpError
@@ -268,7 +269,7 @@ def summraize(state: DigestState):
 
     # The model refers to articles by list index; resolve_cards maps each id back to the real URL.
     articles_for_prompt = [
-        {"id": i, "title": a.subject, "origin": a.origin, "read_status": a.read_status, "text": article_text(a)}
+        {"id": i, "title": a.name, "author": a.author, "signal": a.signal, "origin": a.origin, "read_status": a.read_status, "text": article_text(a)}
         for i, a in enumerate(articles)
     ]
 

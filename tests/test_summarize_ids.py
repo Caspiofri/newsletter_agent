@@ -7,8 +7,12 @@ from modules import nodes
 from modules.models import Article
 
 
-def _art(url="https://a.example/x", content="body", link_status="ok", origin="inbox", read_status="full"):
-    return Article(subject="s", name="n", published_at=date.today(), content=content,
+_seq = iter(range(10**6))
+
+
+def _art(url="https://a.example/x", content="body", link_status="ok", origin="inbox", read_status="full",
+         author=None, signal=""):
+    return Article(subject="s", name=f"Title-{next(_seq)}", author=author, signal=signal, published_at=date.today(), content=content,
                    url=url, link_status=link_status, origin=origin, read_status=read_status)
 
 
@@ -46,6 +50,14 @@ def test_prompt_contains_text_beyond_2000_chars():
     _, prompt = _run(arts, {"cards": [_card(0)], "brief_items": [], "actions": ["a"]})
     assert "ZMARK" in prompt
     assert '"id": 0' in prompt
+
+
+def test_prompt_carries_article_title_author_signal_not_topic():
+    arts = [_art("https://a.example/0", author="Jane Doe", signal="193 points, 40 comments")]
+    _, prompt = _run(arts, {"cards": [_card(0)], "brief_items": [], "actions": ["a"]})
+    assert f'"title": "{arts[0].name}"' in prompt
+    assert '"title": "s"' not in prompt
+    assert "Jane Doe" in prompt and "193 points, 40 comments" in prompt
 
 
 def test_dead_link_article_renders_disabled():
