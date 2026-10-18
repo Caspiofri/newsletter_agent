@@ -134,12 +134,3 @@ def resolve_links(urls: list[str], max_workers: int = 16) -> dict[str, tuple[str
         return {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         return dict(zip(unique, pool.map(resolve_link, unique)))
-
-
-def classify_links(urls: list[str], max_workers: int = 16) -> dict[str, str]:
-    """Map each url to its check_link status."""
-    unique = list(dict.fromkeys(urls))
-    if not unique:
-        return {}
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return dict(zip(unique, pool.map(check_link, unique)))

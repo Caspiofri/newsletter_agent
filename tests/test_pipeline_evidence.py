@@ -198,6 +198,15 @@ def test_summarize_records_card_counts():
     assert out["run_stats"] == {"picked": 2, "cards": 1, "brief_items": 1}
 
 
+def test_dedupe_trace_outputs_tolerates_a_failed_run():
+    assert article_store._dedupe_trace_outputs(None) == {"documents": []}   # langsmith passes None on the error path
+    assert article_store._dedupe_trace_outputs(()) == {"documents": []}
+    assert article_store._dedupe_trace_outputs("odd") == {"documents": []}
+    m = {"matched_title": "M", "title": "T", "similarity": 0.9, "matched_sent_on": "2026-10-01", "dropped": True}
+    out = article_store._dedupe_trace_outputs(([], [m]))
+    assert out["documents"][0]["page_content"] == "M" and out["documents"][0]["metadata"]["similarity"] == 0.9
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

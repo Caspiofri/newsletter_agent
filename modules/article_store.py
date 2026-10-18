@@ -4,8 +4,8 @@ from datetime import date, timedelta
 import numpy as np
 from bs4 import BeautifulSoup
 from chromadb import PersistentClient
-from langsmith import traceable
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from langsmith import traceable
 
 from config.settings import CHROMA_PATH, DEDUPE_NEAR_MISS_MIN
 from modules.models import Article
@@ -110,6 +110,8 @@ def _dedupe_trace_inputs(inputs: dict) -> dict:
 
 def _dedupe_trace_outputs(result) -> dict:
     """Show the lookup as scored documents: the matched sent title with its similarity."""
+    if not isinstance(result, tuple) or len(result) != 2:  # langsmith passes None when the run failed
+        return {"documents": []}
     _, matches = result
     return {"documents": [{
         "page_content": m["matched_title"],
