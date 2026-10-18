@@ -17,16 +17,18 @@ class Article(BaseModel):
 
 
 class ArticleCard(BaseModel):
+    id: Optional[int] = None  # index into the article list; resolve_cards fills url from it
     title: str          # Hebrew title with emoji
     source: str
     brief: str          # "השורה התחתונה" — 1-2 sentence factual summary
     personalization: str  # "איך זה פוגש אותך" — audience-specific angle
-    url: str
+    url: str = ""
 
 
 class BriefItem(BaseModel):
+    id: Optional[int] = None
     summary: str        # 1-sentence Hebrew summary
-    url: str
+    url: str = ""
 
 
 class NewsletterData(BaseModel):
