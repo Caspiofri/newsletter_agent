@@ -50,16 +50,19 @@ def post_summary(summary: dict, run_id, client=None) -> None:
 
 def judge_and_post(result: dict, profile: str, run_tree) -> None:
     """Attach the run summary, run the judge, post feedback. Never raises."""
-    run_id = run_tree.id if run_tree is not None else None
-    summary = run_summary(result)
     try:
-        if run_tree is not None:
-            run_tree.add_metadata({"run_summary": summary})
+        run_id = run_tree.id if run_tree is not None else None
+        summary = run_summary(result)
+        try:
+            if run_tree is not None:
+                run_tree.add_metadata({"run_summary": summary})
+        except Exception as e:
+            print(f"[warn] Failed to add run summary metadata: {e}")
+        post_summary(summary, run_id)
+        try:
+            report = trace_judge.judge_run(result, profile)
+            post_feedback(report, run_id)
+        except Exception as e:
+            print(f"[warn] Judge failed: {e}")
     except Exception as e:
-        print(f"[warn] Failed to add run summary metadata: {e}")
-    post_summary(summary, run_id)
-    try:
-        report = trace_judge.judge_run(result, profile)
-        post_feedback(report, run_id)
-    except Exception as e:
-        print(f"[warn] Judge failed: {e}")
+        print(f"[warn] judge_and_post failed: {e}")

@@ -90,6 +90,41 @@ def test_judge_and_post_without_run_tree():
         tracing.judge_and_post({"email_status": "sent"}, "AI", None)  # must not raise
 
 
+def test_judge_and_post_never_raises_when_summary_fails():
+    rt = MagicMock()
+    with patch.object(tracing, "run_summary", side_effect=RuntimeError("boom")):
+        tracing.judge_and_post({"email_status": "sent"}, "AI", rt)  # must not raise
+
+
+def test_tests_package_disables_tracing():
+    import os
+    from langsmith.utils import get_env_var, tracing_is_enabled
+    old = os.environ.get("LANGCHAIN_TRACING")
+    os.environ["LANGCHAIN_TRACING"] = "true"
+    get_env_var.cache_clear()
+    try:
+        assert os.environ["LANGSMITH_TRACING"] == "false"
+        assert not tracing_is_enabled()
+    finally:
+        if old is None:
+            os.environ.pop("LANGCHAIN_TRACING", None)
+        else:
+            os.environ["LANGCHAIN_TRACING"] = old
+        get_env_var.cache_clear()
+
+
+def test_context_thread_pool_copies_context_to_workers():
+    import contextvars
+    from langsmith.utils import ContextThreadPoolExecutor
+    from modules import nodes
+    assert nodes.ThreadPoolExecutor is ContextThreadPoolExecutor
+    var = contextvars.ContextVar("v", default=None)
+    var.set("parent")
+    with nodes.ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(lambda _: var.get(), [1, 2])) == ["parent", "parent"]
+        assert pool.submit(var.get).result() == "parent"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
