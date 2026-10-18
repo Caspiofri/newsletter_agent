@@ -1,5 +1,7 @@
 """Reader: fetches the full text of shortlisted articles so ranking and summarizing see more than a teaser."""
+import re
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 import requests
 import trafilatura
@@ -11,6 +13,31 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml",
 }
+# where the abstract ends on an arxiv.org/abs page (the rest is site chrome)
+_ARXIV_CUT_MARKERS = ("Comments:", "Subjects:", "Cite as:", "Submission history", "Bibliographic", "Bookmark",
+                      "Additional Features", "arXivLabs")
+
+
+def clean_page_text(final_url: str, text: str) -> str:
+    """For an arxiv.org/abs page keep the title, submission date and abstract; anything else comes back unchanged."""
+    try:
+        parsed = urlparse(final_url)
+        if parsed.hostname not in ("arxiv.org", "www.arxiv.org") or not parsed.path.startswith("/abs/"):
+            return text
+        start = text.find("Abstract:")
+        if start < 0:
+            return text
+        abstract = text[start:]
+        cuts = [abstract.find(m) for m in _ARXIV_CUT_MARKERS]
+        end = min((c for c in cuts if c >= 0), default=len(abstract))
+        abstract = abstract[:end].strip()
+        head = text[:start]
+        title = re.search(r"^\s*Title:.*$", head, re.M)
+        submitted = re.search(r"^\s*\[Submitted on[^\n]*$", head, re.M)
+        lines = [m.group(0).strip() for m in (title, submitted) if m] + [abstract]
+        return "\n".join(lines) if len(lines) > 1 else text
+    except Exception:  # cleaning is best effort; the raw text is always usable
+        return text
 
 
 def fetch_text(url: str, timeout: int = 10) -> str | None:
@@ -19,7 +46,8 @@ def fetch_text(url: str, timeout: int = 10) -> str | None:
         resp = requests.get(url, headers=_HEADERS, timeout=timeout, allow_redirects=True)
         if resp.status_code != 200 or "html" not in resp.headers.get("content-type", "html"):
             return None
-        return trafilatura.extract(resp.text, include_comments=False, include_tables=False) or None
+        text = trafilatura.extract(resp.text, include_comments=False, include_tables=False)
+        return clean_page_text(resp.url, text) if text else None
     except Exception:  # network errors and parser errors both mean "keep the teaser"
         return None
 
