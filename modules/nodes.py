@@ -74,6 +74,16 @@ def fetch_articles(state: DigestState) -> dict:
     return {"articles": articles}
 
 
+def _pick_by_ids(items: list, pool: list[Article], limit: int) -> list[Article]:
+    """Map the LLM's ids to articles: ints in range only, LLM order, no duplicates, at most `limit`."""
+    picked, seen = [], set()
+    for i in items:
+        if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < len(pool) and i not in seen:
+            seen.add(i)
+            picked.append(pool[i])
+    return picked[:limit]
+
+
 def fillter_articles(state: DigestState) -> dict:
     articles = state["articles"]
     if not articles:
@@ -86,8 +96,8 @@ def fillter_articles(state: DigestState) -> dict:
     if len(good) >= top_k:
         articles = good
     articles_meta = [
-        {"name": a.name, "author": a.author, "published_at": str(a.published_at)}
-        for a in articles
+        {"id": i, "name": a.name, "author": a.author, "published_at": str(a.published_at)}
+        for i, a in enumerate(articles)
     ]
     prompt = f"""You are a newsletter writer for a digest about {subject}.
     From these articles {json.dumps(articles_meta, ensure_ascii=False)}, select up to {top_k}
@@ -95,15 +105,14 @@ def fillter_articles(state: DigestState) -> dict:
     EXCLUDE any article that is off-topic or only tangentially related — it is better to
     return fewer articles (or none at all) than to include irrelevant ones.
     If NONE of the articles are relevant to {subject}, return an empty array [].
-    please return ONLY a JSON array of the selected article names, no extra text:
-    ["article name 1", "article name 2", "article name 3"]
+    please return ONLY a JSON array of the selected article ids, no extra text,
+    for example [2, 0], or [] if none:
     """
     text = _call_gemini(prompt)
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if not match:
         raise ValueError(f"No JSON array found in filter response: {text!r}")
-    selected_names = json.loads(match.group())
-    top_articles = [a for a in articles if a.name in selected_names]
+    top_articles = _pick_by_ids(json.loads(match.group()), articles, top_k)
     return {"top_articles": top_articles}
 
 
