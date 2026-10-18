@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Labeling hub</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1a202c; --muted:#64748b; --line:#e2e8f0; --accent:#3d5a80;
+          --must:#15803d; --worth:#b45309; --skip:#b91c1c; --chip:#eef2f7; --warn:#fef3c7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1419; --card:#18202a; --text:#e5e9f0; --muted:#94a3b8; --line:#2a3544; --accent:#7aa2d6;
+            --must:#4ade80; --worth:#fbbf24; --skip:#f87171; --chip:#222d3a; --warn:#3b3217; } }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 16px; }
+  h1 { font-size:17px; margin:0 0 6px; }
+  .row { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; font-size:13px; color:var(--muted); margin:4px 0; }
+  select, button, input[type=number], textarea { font:inherit; padding:4px 8px; border:1px solid var(--line);
+      border-radius:6px; background:var(--card); color:var(--text); }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  input[type=number] { width:64px; }
+  .track { flex:1 1 200px; height:10px; background:var(--chip); border-radius:5px; overflow:hidden; }
+  .track i { display:block; height:100%; background:var(--accent); width:0; }
+  .banner { padding:6px 10px; border-radius:6px; background:var(--warn); color:var(--text); font-size:13px; margin:4px 0; }
+  .banner.hot { border:1px solid var(--worth); font-weight:600; }
+  main { max-width:860px; margin:0 auto; padding:12px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card.done { border-left:4px solid var(--accent); }
+  .title { font-weight:600; font-size:17px; }
+  .title a { color:inherit; text-decoration:none; } .title a:hover { text-decoration:underline; }
+  .meta { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .chip { background:var(--chip); color:var(--muted); border-radius:999px; padding:1px 9px; font-size:12px; }
+  .chip.bad { color:var(--skip); }
+  .ranker { margin:6px 0; font-size:13px; padding:6px 10px; border-radius:6px; background:var(--chip); }
+  .text { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:8px 10px;
+          white-space:pre-wrap; word-break:break-word; font-size:13px; color:var(--muted); margin:8px 0; }
+  .labels { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  .labels button { padding:6px 14px; border-radius:8px; }
+  .labels button.on[data-l="must"] { background:var(--must); border-color:var(--must); color:#fff; }
+  .labels button.on[data-l="worth"] { background:var(--worth); border-color:var(--worth); color:#fff; }
+  .labels button.on[data-l="skip"] { background:var(--skip); border-color:var(--skip); color:#fff; }
+  textarea { flex:1 1 100%; min-height:48px; }
+  #controls { margin-top:10px; }
+  .hint { color:var(--muted); font-size:12px; margin:8px 0 0; }
+  .nav { display:flex; justify-content:space-between; align-items:center; margin:8px 0; font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Labeling hub</h1>
+  <div class="row">
+    <span id="progress"></span>
+    <div class="track"><i id="fill"></i></div>
+    <label>target <input type="number" id="target" min="1"></label>
+    <label><input type="checkbox" id="reveal" onchange="render()"> show ranker score and picks</label>
+  </div>
+  <div class="row" id="counts"></div>
+  <div id="warnings"></div>
+  <div class="banner" id="unexported" hidden></div>
+  <div class="banner" id="nostore" hidden>Browser storage is blocked: your labels will not be remembered. Export before closing the page.</div>
+  <div class="row">
+    <label>Show <select id="f-status" onchange="applyAndRender()">
+      <option value="all">all</option><option value="unlabeled">unlabeled</option><option value="labeled">labeled</option></select></label>
+    <label>label <select id="f-label" onchange="applyAndRender()">
+      <option value="">any</option><option value="must">must</option><option value="worth">worth</option><option value="skip">skip</option></select></label>
+    <label>origin <select id="f-origin" onchange="applyAndRender()"></select></label>
+    <label>group <select id="f-group" onchange="applyAndRender()">
+      <option value="">any</option><option value="shortlisted">shortlisted</option><option value="sample">sample</option></select></label>
+    <label>text <select id="f-read" onchange="applyAndRender()"></select></label>
+    <button class="primary" id="export" onclick="exportLabels()">Export labels</button>
+    <button id="load" onclick="document.getElementById('load-file').click()">Load labels file</button>
+    <input type="file" id="load-file" accept=".json,application/json" hidden onchange="loadFile(this.files[0])">
+  </div>
+</header>
+<main>
+  <div class="nav"><button onclick="move(-1)">&larr; previous (p)</button><span id="pos"></span>
+    <button onclick="move(1)">next (n) &rarr;</button><button onclick="goUnlabeled()">next unlabeled (u)</button></div>
+  <div class="card" id="card"></div>
+  <div class="card labels" id="controls">
+    <button id="btn-must" data-l="must" onclick="setLabel('must')">Must-read (1)</button>
+    <button id="btn-worth" data-l="worth" onclick="setLabel('worth')">Worth it (2)</button>
+    <button id="btn-skip" data-l="skip" onclick="setLabel('skip')">Skip (3)</button>
+    <select id="tag" onchange="saveFields()"></select>
+    <label><input type="checkbox" id="read-full" onchange="saveFields()"> I read the full article</label>
+    <textarea id="note" placeholder="note (optional)" onchange="saveFields()"></textarea>
+  </div>
+  <p class="hint">Keys: 1 must-read, 2 worth it, 3 skip, n next, p previous, u next unlabeled.</p>
+</main>
+<script id="data" type="application/json">__DATA__</script>
+<script id="logic">
+// ---- pure functions (no DOM): tested through node ----
+const LABEL_NAMES = ['must', 'worth', 'skip'];
+const TAGS = ['', 'great primary source', 'practical / useful', 'beginner', 'promo', 'hype', 'off-topic', 'too thin', 'full text mattered', 'other'];
+const MIN_LABELS_FOR_WARNINGS = 10, MIN_SKIP_SHARE = 0.15, MIN_SAMPLE_SHARE = 0.25;
+
+const labelOf = (labels, it) => (labels[it.url] && labels[it.url].label) || '';
+
+function applyFilters(items, labels, f) {
+  f = f || {};
+  return items.filter(it => {
+    const l = labelOf(labels, it);
+    if (f.status === 'unlabeled' && l) return false;
+    if (f.status === 'labeled' && !l) return false;
+    if (f.label && l !== f.label) return false;
+    if (f.origin && it.origin !== f.origin) return false;
+    if (f.group && it.group !== f.group) return false;
+    if (f.read && it.read_status !== f.read) return false;
+    return true;
+  });
+}
+
+function progressStats(items, labels, target) {
+  const s = { labeled: 0, target: target, byLabel: { must: 0, worth: 0, skip: 0 }, byGroup: {}, byOrigin: {}, warnings: [] };
+  for (const it of items) {
+    const l = labelOf(labels, it);
+    if (!l) continue;
+    s.labeled++;
+    s.byLabel[l] = (s.byLabel[l] || 0) + 1;
+    s.byGroup[it.group] = (s.byGroup[it.group] || 0) + 1;
+    s.byOrigin[it.origin] = (s.byOrigin[it.origin] || 0) + 1;
+  }
+  if (s.labeled >= MIN_LABELS_FOR_WARNINGS) {
+    if (s.byLabel.skip < MIN_SKIP_SHARE * s.labeled) s.warnings.push('Only ' + s.byLabel.skip + ' of ' + s.labeled + ' labels are skips: add more skips (aim for at least 15 percent).');
+    if ((s.byGroup.sample || 0) < MIN_SAMPLE_SHARE * s.labeled) s.warnings.push('Only ' + (s.byGroup.sample || 0) + ' of ' + s.labeled + ' labels are random-sample articles: label more sample items (aim for at least 25 percent).');
+  }
+  return s;
+}
+
+function buildExport(items, labels, runId) {
+  const out = [];
+  for (const it of items) {
+    const l = labels[it.url];
+    if (!l || !l.label) continue;
+    out.push({
+      url: it.url, title: it.title, label: l.label, tag: l.tag || '', note: l.note || '',
+      labeled_with: l.labeled_with || 'snapshot', source_run: it.source_run || '', origin: it.origin, author: it.author,
+      published_at: it.published_at, read_status: it.read_status, signal: it.signal, group: it.group,
+      ranker_picked: it.picked, ranker_score: it.score, content: it.content });
+  }
+  return { run_id: runId, labels: out };
+}
+
+// a loaded export fills in labels; a local label stays unless the loaded row carries a newer "at"
+function mergeLoaded(labels, loaded) {
+  const out = Object.assign({}, labels);
+  for (const row of (loaded && loaded.labels) || []) {
+    if (!row.url || LABEL_NAMES.indexOf(row.label) < 0) continue;
+    const local = out[row.url];
+    if (local && local.label && (local.at || 0) >= (row.at || 0)) continue;
+    out[row.url] = { label: row.label, tag: row.tag || '', note: row.note || '',
+                     labeled_with: row.labeled_with || 'snapshot', at: row.at || 0 };
+  }
+  return out;
+}
+
+// index of the next unlabeled item after `from`, wrapping around; -1 when everything is labeled
+function nextUnlabeled(items, labels, from) {
+  for (let k = 1; k <= items.length; k++) {
+    const i = (from + k) % items.length;
+    if (!labelOf(labels, items[i])) return i;
+  }
+  return -1;
+}
+</script>
+<script>
+// ---- DOM layer ----
+const D = JSON.parse(document.getElementById('data').textContent);
+const STORE_KEY = 'label_hub:v1', META_KEY = 'label_hub:v1:meta';
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+let storeOk = true, labels = {}, lastExport = 0, view = [], cur = 0, target = D.target;
+
+function readStore(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { storeOk = false; return fallback; }
+}
+function writeStore(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { storeOk = false; }
+}
+function persist() { writeStore(STORE_KEY, labels); $('nostore').hidden = storeOk; }
+
+// labels already in the golden set come with the items; this browser's own labels win over them
+const fromGolden = {};
+for (const it of D.items) if (it.label) fromGolden[it.url] = { label: it.label, tag: it.tag, note: it.note, labeled_with: it.labeled_with || 'snapshot', at: 0 };
+labels = Object.assign({}, fromGolden, readStore(STORE_KEY, {}));
+lastExport = (readStore(META_KEY, {}) || {}).lastExport || 0;
+target = (readStore(META_KEY, {}) || {}).target || D.target;
+
+function fillSelect(id, values, anyText) {
+  const s = $(id); s.replaceChildren();
+  for (const v of ['', ...values]) { const o = el('option', null, v || anyText); o.value = v; s.append(o); }
+}
+fillSelect('f-origin', [...new Set(D.items.map(i => i.origin))].sort(), 'any');
+fillSelect('f-read', [...new Set(D.items.map(i => i.read_status))].sort(), 'any');
+$('target').value = target;
+$('target').onchange = () => { target = Math.max(1, +$('target').value || D.target); writeStore(META_KEY, { lastExport, target }); updateProgress(); };
+
+function filters() {
+  return { status: $('f-status').value, label: $('f-label').value, origin: $('f-origin').value,
+           group: $('f-group').value, read: $('f-read').value };
+}
+function applyAndRender() { view = applyFilters(D.items, labels, filters()); cur = Math.min(cur, Math.max(0, view.length - 1)); render(); }
+
+function setLabel(k) {
+  const it = view[cur]; if (!it) return;
+  const old = labels[it.url] || {};
+  const same = old.label === k;
+  labels[it.url] = { ...old, label: same ? undefined : k, at: Date.now(), labeled_with: $('read-full').checked ? 'article' : 'snapshot',
+                     tag: $('tag').value, note: $('note').value };
+  if (!labels[it.url].label && !labels[it.url].tag && !labels[it.url].note) delete labels[it.url];
+  persist(); render();
+}
+function saveFields() {
+  const it = view[cur]; if (!it) return;
+  const old = labels[it.url] || {};
+  labels[it.url] = { ...old, tag: $('tag').value, note: $('note').value, labeled_with: $('read-full').checked ? 'article' : 'snapshot', at: Date.now() };
+  if (!labels[it.url].label && !labels[it.url].tag && !labels[it.url].note) delete labels[it.url];
+  persist(); updateProgress();
+}
+function move(d) { if (!view.length) return; cur = (cur + d + view.length) % view.length; render(); }
+function goUnlabeled() {
+  const i = nextUnlabeled(view, labels, cur);
+  if (i >= 0) { cur = i; render(); } else alert('Every item in this view is labeled.');
+}
+
+function exportLabels() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '_').slice(0, 15);
+  const out = buildExport(D.items, labels, 'hub_' + stamp);
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'ranking_labels_hub_' + stamp + '.json'; a.click();
+  lastExport = Date.now(); writeStore(META_KEY, { lastExport, target }); updateProgress();
+}
+function loadFile(file) {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try { labels = mergeLoaded(labels, JSON.parse(r.result)); persist(); applyAndRender(); }
+    catch (e) { alert('Could not read that labels file: ' + e.message); }
+  };
+  r.readAsText(file);
+}
+
+function updateProgress() {
+  const s = progressStats(D.items, labels, target);
+  $('progress').textContent = s.labeled + ' / ' + target + ' labeled';
+  $('fill').style.width = Math.min(100, 100 * s.labeled / target) + '%';
+  const part = o => Object.entries(o).map(([k, v]) => k + ' ' + v).join(', ') || 'none';
+  $('counts').textContent = 'labels: ' + part(s.byLabel) + ' | groups: ' + part(s.byGroup) + ' | origins: ' + part(s.byOrigin);
+  $('warnings').replaceChildren(...s.warnings.map(w => el('div', 'banner', w)));
+  const fresh = D.items.filter(it => labelOf(labels, it) && (labels[it.url].at || 0) > lastExport).length;
+  const b = $('unexported'); b.hidden = fresh === 0;
+  b.textContent = fresh + ' labels not exported yet' + (fresh >= 10 ? ': export now so nothing is lost' : '');
+  b.className = 'banner' + (fresh >= 10 ? ' hot' : '');
+}
+
+function render() {
+  $('nostore').hidden = storeOk;
+  const card = $('card'); card.replaceChildren();
+  $('pos').textContent = view.length ? (cur + 1) + ' of ' + view.length : '0 of 0';
+  updateProgress();
+  const it = view[cur];
+  $('controls').hidden = true;
+  if (!it) { card.append(el('div', null, 'No items match these filters.')); return; }
+  const lab = labels[it.url] || {};
+  card.className = 'card' + (lab.label ? ' done' : '');
+  const t = el('div', 'title'); t.dir = 'auto';
+  const a = el('a', null, it.title); a.href = it.url; a.target = '_blank'; a.rel = 'noopener'; t.append(a); card.append(t);
+  const meta = el('div', 'meta');
+  for (const [txt, bad] of [[it.origin], [it.author], [it.published_at], ['text: ' + it.read_status, it.read_status === 'snippet'],
+                            [it.group], ['report ' + it.source_run]])
+    if (txt) meta.append(el('span', 'chip' + (bad ? ' bad' : ''), txt));
+  card.append(meta);
+  if ($('reveal').checked) {
+    card.append(el('div', 'ranker', it.group === 'sample' ? 'Not seen by the ranker (random sample)'
+      : (it.picked ? 'picked, ' : '') + 'ranker score ' + (it.score == null ? '-' : it.score) + (it.reason ? ': ' + it.reason : '')));
+  }
+  const txt = el('div', 'text', it.content || '(no stored text)'); txt.dir = 'auto'; card.append(txt);
+  for (const k of LABEL_NAMES) $('btn-' + k).className = lab.label === k ? 'on' : '';
+  $('tag').value = lab.tag || '';
+  $('read-full').checked = lab.labeled_with === 'article';
+  $('note').value = lab.note || '';
+  $('controls').hidden = false;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const k = e.key;
+  if (k === '1') setLabel('must'); else if (k === '2') setLabel('worth'); else if (k === '3') setLabel('skip');
+  else if (k === 'n') move(1); else if (k === 'p') move(-1); else if (k === 'u') goUnlabeled();
+});
+for (const tg of TAGS) { const o = el('option', null, tg || 'reason (optional)'); o.value = tg; $('tag').append(o); }
+$('f-status').value = 'unlabeled';
+applyAndRender();
+</script>
+</body>
+</html>

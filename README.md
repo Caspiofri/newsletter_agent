@@ -139,6 +139,23 @@ python -m evals.import_labels output/ranking_labels_ai_<run>.json
 # -> evals/ranking_golden.json (keyed by URL, with a text snapshot so labels survive link rot)
 ```
 
+#### Labeling hub
+
+To grade articles from every report in one place instead of one page per run:
+
+```bash
+python -m evals.label_hub [--target 80] [--out output/label_hub.html]
+# -> "N items (M already labeled) -> output/label_hub.html"
+```
+
+The page gathers every `output/ranking_*.json` (the newest report wins when an article appears twice) plus the labels already in `evals/ranking_golden.json`. It shows one article at a time with its stored text; label with the buttons or the keys `1` must-read, `2` worth it, `3` skip, move with `n` / `p`, jump to the next unlabeled with `u`. Tick "I read the full article" when you judged from the article rather than the snapshot. A progress bar tracks labels against the target and warns when skips are under 15 percent or random-sample items under 25 percent of your labels. Labels are kept in the browser (regenerating the hub keeps them). "Export labels" downloads `ranking_labels_hub_<timestamp>.json`; "Load labels file" restores a previous export. Import it like any other export:
+
+```bash
+python -m evals.import_labels ~/Downloads/ranking_labels_hub_<timestamp>.json
+```
+
+Old exports from the per-run pages may hold Substack redirect URLs; run `python -m evals.canonicalize_labels <file>` once on each before importing, so those labels match the real article URLs the hub shows.
+
 ### Live trace judging (`modules/trace_judge.py`)
 
 `evals/eval.py` tests nodes in isolation against fixtures. `modules/trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.

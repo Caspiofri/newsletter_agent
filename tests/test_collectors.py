@@ -267,6 +267,14 @@ def test_import_labels_merges_by_url():
     assert {g["url"]: g["label"] for g in merged} == {"https://a": "must", "https://b": "worth"}
 
 
+def test_import_labels_keeps_a_rows_own_source_run():
+    from evals import import_labels
+    exported = {"run_id": "hub_1", "labels": [{"url": "https://a", "label": "must", "source_run": "20261001_070000"},
+                                              {"url": "https://b", "label": "skip"}]}
+    merged, _, _ = import_labels.merge([], exported, "2026-10-18")
+    assert {g["url"]: g["source_run"] for g in merged} == {"https://a": "20261001_070000", "https://b": "hub_1"}
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
