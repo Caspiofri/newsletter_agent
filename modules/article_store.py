@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from chromadb import PersistentClient
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-from config.settings import CHROMA_PATH
+from config.settings import CHROMA_PATH, DEDUPE_NEAR_MISS_MIN
 from modules.models import Article
 
 _embed_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
@@ -95,17 +95,25 @@ def _dedup_batch(articles: list[Article]) -> list[Article]:
     return [a for a, k in zip(articles, keep) if k]
 
 
-def filter_seen(articles: list[Article], profile: str, days: int = DEDUPE_DAYS) -> list[Article]:
+def _sent_on(date_int) -> str:
+    """Stored YYYYMMDD int -> "YYYY-MM-DD"; "" for records without a date."""
+    text = str(date_int or "")
+    return f"{text[:4]}-{text[4:6]}-{text[6:8]}" if len(text) == 8 else ""
+
+
+def filter_seen_detailed(articles: list[Article], profile: str,
+                         days: int = DEDUPE_DAYS) -> tuple[list[Article], list[dict]]:
+    """Survivors plus one record per article whose nearest sent article is a near-miss or a duplicate."""
     if not articles:
-        return articles
+        return articles, []
 
     articles = _dedup_batch(articles)
     if not articles:
-        return articles
+        return articles, []
 
     col = _collection(profile)
     if col.count() == 0:
-        return articles
+        return articles, []
 
     cutoff = int((date.today() - timedelta(days=days)).strftime("%Y%m%d"))
     distance_threshold = 1.0 - SIMILARITY_THRESHOLD
@@ -115,15 +123,31 @@ def filter_seen(articles: list[Article], profile: str, days: int = DEDUPE_DAYS) 
             query_texts=[_article_text(a) for a in articles],
             n_results=1,
             where={"date": {"$gte": cutoff}},
-            include=["distances"],
+            include=["distances", "metadatas"],
         )
     except Exception:
-        return articles
+        return articles, []
 
-    unseen = []
-    for article, distances in zip(articles, results["distances"]):
+    unseen, matches = [], []
+    for article, distances, metadatas in zip(articles, results["distances"], results["metadatas"]):
         min_dist = min(distances) if distances else 1.0
         if min_dist >= distance_threshold:
             unseen.append(article)
+        if distances:
+            similarity = round(1.0 - min_dist, 3)
+            if similarity >= DEDUPE_NEAR_MISS_MIN:
+                meta = metadatas[distances.index(min_dist)] or {}
+                matches.append({
+                    "title": article.name,
+                    "url": article.url,
+                    "similarity": similarity,
+                    "matched_title": meta.get("name", ""),
+                    "matched_sent_on": _sent_on(meta.get("date")),
+                    "dropped": min_dist < distance_threshold,
+                })
 
-    return unseen
+    return unseen, matches
+
+
+def filter_seen(articles: list[Article], profile: str, days: int = DEDUPE_DAYS) -> list[Article]:
+    return filter_seen_detailed(articles, profile, days)[0]

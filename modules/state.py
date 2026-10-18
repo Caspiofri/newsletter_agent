@@ -19,6 +19,10 @@ class DigestState(TypedDict):
     # written in parallel by the collector nodes; combined with `articles` in merge_sources
     extra_articles: Annotated[list[Article], operator.add]
     top_articles: list[Article]
+    # evidence for the trace; each node after merge writes {**state.get("run_stats", {}), ...}
+    run_stats: dict[str, int]
+    dedupe_drops: list[dict]
+    rank_scores: list[dict]
     newsletter_data: Optional[NewsletterData]
     summary: str
     email_status: str

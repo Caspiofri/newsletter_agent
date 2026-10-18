@@ -26,6 +26,7 @@ COLLECTOR_MAX_AGE_DAYS = 2
 SHORTLIST_QUOTA = {"inbox": 10, "hackernews": 6, "medium": 6}
 READ_MAX_CHARS = 6000
 RANK_MIN_SCORE = 5
+DEDUPE_NEAR_MISS_MIN = 0.70  # cosine similarity; dedupe matches at or above this are reported in the trace
 SNIPPET_SCORE_CAP = 6  # an article we could only read a teaser of cannot score above this
 
 # LLM judge models (Claude, so the judge is not the same family as the ranker and writer)

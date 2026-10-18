@@ -331,7 +331,8 @@ INPUT ARTICLES (use each article's "id" exactly as given):
     bad_urls = frozenset(a.url or "" for a in articles if a.link_status != "ok" or not a.url)
     html = _render_html(data, title, today, bad_urls)
 
-    return {"summary": html, "newsletter_data": data}
+    stats = {**state.get("run_stats", {}), "cards": len(data.cards), "brief_items": len(data.brief_items)}
+    return {"summary": html, "newsletter_data": data, "run_stats": stats}
 
 
 def send_email(state: DigestState) -> dict:
@@ -356,11 +357,12 @@ def send_email(state: DigestState) -> dict:
 def dedupe_articles(state: DigestState) -> dict:
     """Drop stories already sent in the last few days, before they can take a shortlist slot."""
     profile = state["digest_name"].lower().replace(" ", "_")
-    unseen = article_store.filter_seen(state["articles"], profile)
+    unseen, matches = article_store.filter_seen_detailed(state["articles"], profile)
     dropped = len(state["articles"]) - len(unseen)
     if dropped:
         print(f"[dedupe] Dropped {dropped} article(s) seen in the last {article_store.DEDUPE_DAYS} days.")
-    return {"articles": unseen}
+    stats = {**state.get("run_stats", {}), "after_dedupe": len(unseen), "dedupe_dropped": dropped}
+    return {"articles": unseen, "dedupe_drops": matches, "run_stats": stats}
 
 
 def shortlist_articles(state: DigestState) -> dict:
@@ -377,14 +379,15 @@ def shortlist_articles(state: DigestState) -> dict:
         candidates = [a for group in pool.map(screen, origins) for a in group]
     print(f"[shortlist] {len(candidates)} of {len(articles)} candidates: "
           f"{ {o: sum(c.origin == o for c in candidates) for o in origins} }")
-    return {"candidates": candidates}
+    return {"candidates": candidates, "run_stats": {**state.get("run_stats", {}), "shortlisted": len(candidates)}}
 
 
 def read_articles(state: DigestState) -> dict:
     candidates = reader.read_articles(state["candidates"], max_chars=settings.READ_MAX_CHARS)
     stats = {s: sum(a.read_status == s for a in candidates) for s in ("full", "partial", "snippet")}
     print(f"[reader] read status: {stats}")
-    return {"candidates": candidates}
+    run_stats = {**state.get("run_stats", {}), **{f"read_{s}": n for s, n in stats.items()}}
+    return {"candidates": candidates, "run_stats": run_stats}
 
 
 _SOURCE_DESCRIPTIONS = {
@@ -417,7 +420,8 @@ def rank_articles(state: DigestState) -> dict:
     """One LLM call scores every candidate on its content and source; the best top_k become top_articles."""
     candidates = state["candidates"]
     if not candidates:
-        return {"top_articles": []}
+        return {"top_articles": [], "rank_scores": [],
+                "run_stats": {**state.get("run_stats", {}), "ranked": 0, "picked": 0}}
     top_k = int(state["top_k"])
     items = [
         {
@@ -466,7 +470,13 @@ CANDIDATES:
         print(f"[rank] Ranking report for labeling: {ranking_report.save(profile, rows)}")
     except Exception as e:
         print(f"[rank] could not write ranking report: {e}")
-    return {"top_articles": top}
+    rank_scores = [
+        {"title": candidates[i].name, "origin": candidates[i].origin, "read_status": candidates[i].read_status,
+         "score": final[i], "reason": reasons.get(i, ""), "picked": id(candidates[i]) in picked}
+        for i in sorted(final, key=lambda i: -final[i])
+    ]
+    stats = {**state.get("run_stats", {}), "ranked": len(final), "picked": len(top)}
+    return {"top_articles": top, "rank_scores": rank_scores, "run_stats": stats}
 
 
 def _map_selection_to_articles(items: list, candidates: list[dict], email_article: Article) -> list[Article]:
@@ -577,7 +587,7 @@ def merge_sources(state: DigestState) -> dict:
     if bad_before:
         print(f"[merge] {bad_before} article(s) had a dead/unverifiable link; "
               f"{bad_before - bad_after} replaced by a direct link, {bad_after} remain.")
-    return {"articles": upgraded}
+    return {"articles": upgraded, "run_stats": {"merged": len(upgraded)}}
 
 
 def expand_search(state: DigestState) -> dict:
