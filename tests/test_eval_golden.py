@@ -39,7 +39,7 @@ def test_report_has_original_score_per_case():
     report, _ = _run()
     assert report["cases"]
     assert all("original_judge_score" in c for c in report["cases"])
-    assert [c["original_judge_score"] for c in report["cases"]] == [3, 3, 3, 3, 5, 5]
+    assert [c["original_judge_score"] for c in report["cases"]] == [c["judge_original_score"] for c in eval_golden._load_golden_set()]
 
 
 def test_score_within_tolerance_counts_as_agreement():
@@ -49,6 +49,21 @@ def test_score_within_tolerance_counts_as_agreement():
     far, _ = _run(fake_score=human + eval_golden.AGREEMENT_TOLERANCE + 1)
     assert near["cases"][0]["agree"] is True
     assert far["cases"][0]["agree"] is False
+
+
+def test_saved_file_name_sanitises_model_id():
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with patch.object(eval_golden, "OUTPUT_DIR", Path(tmp)), \
+                patch.object(eval_golden, "run_golden_eval", return_value={"model": "vendor/model:1", "cases": []}), \
+                patch.object(eval_golden, "print_report"), \
+                patch.object(sys, "argv", ["eval_golden", "--model", "vendor/model:1"]):
+            eval_golden.main()
+        names = [p.name for p in Path(tmp).iterdir()]
+    assert len(names) == 1 and names[0].startswith("eval_golden_vendor_model_1_"), names
 
 
 if __name__ == "__main__":

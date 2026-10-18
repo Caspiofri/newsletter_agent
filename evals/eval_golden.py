@@ -18,6 +18,7 @@ Results are printed as a table and saved to output/eval_golden_<model>_<timestam
 
 import argparse
 import json
+import re
 from datetime import date, datetime
 
 from config.settings import GOLDEN_SET_PATH, JUDGE_MODEL_DAILY, JUDGE_MODEL_EVAL, OUTPUT_DIR
@@ -131,7 +132,8 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = OUTPUT_DIR / f"eval_golden_{model}_{ts}.json"
+    safe_model = re.sub(r"[^A-Za-z0-9._-]", "_", model)
+    path = OUTPUT_DIR / f"eval_golden_{safe_model}_{ts}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2, default=str)
     print(f"Report saved → {path}")
