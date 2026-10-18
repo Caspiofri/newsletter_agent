@@ -20,6 +20,25 @@ def test_clean_drops_site_chrome():
     out = reader.clean_page_text(ABS_URL, FIXTURE)
     for junk in ("arXivLabs", "View PDF", "HTML (experimental)", "Bibliographic", "Computer Science >"):
         assert junk not in out, junk
+    assert out.startswith("Title:") or out.startswith("[Submitted on"), out[:60]
+
+
+MID_SENTENCE = ("Computer Science > AI\n  [Submitted on 9 Oct 2026]\n    Title:T\nView PDF\n"
+                "   Abstract:We study bibliographic data and Bookmark tools. Comments: are noisy; Cite as: x.\n    \n"
+                "{tail}")
+
+
+def test_marker_words_inside_abstract_do_not_cut():
+    text = MID_SENTENCE.format(tail="Additional Features\narXivLabs")
+    out = reader.clean_page_text(ABS_URL, text)
+    assert "bibliographic data and Bookmark tools. Comments: are noisy; Cite as: x." in out, out
+    assert "Additional Features" not in out and "arXivLabs" not in out, out
+
+
+def test_marker_at_line_start_still_cuts():
+    text = MID_SENTENCE.format(tail="Comments: 12 pages\nSubjects: cs.AI")
+    out = reader.clean_page_text(ABS_URL, text)
+    assert "12 pages" not in out and "Subjects" not in out and "Cite as: x." in out, out
 
 
 def test_clean_is_much_shorter():

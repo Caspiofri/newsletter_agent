@@ -16,6 +16,7 @@ _HEADERS = {
 # where the abstract ends on an arxiv.org/abs page (the rest is site chrome)
 _ARXIV_CUT_MARKERS = ("Comments:", "Subjects:", "Cite as:", "Submission history", "Bibliographic", "Bookmark",
                       "Additional Features", "arXivLabs")
+_ARXIV_CUT_RE = re.compile(r"^[ \t]*(?:%s)" % "|".join(map(re.escape, _ARXIV_CUT_MARKERS)), re.M)
 
 
 def clean_page_text(final_url: str, text: str) -> str:
@@ -28,13 +29,15 @@ def clean_page_text(final_url: str, text: str) -> str:
         if start < 0:
             return text
         abstract = text[start:]
-        cuts = [abstract.find(m) for m in _ARXIV_CUT_MARKERS]
-        end = min((c for c in cuts if c >= 0), default=len(abstract))
-        abstract = abstract[:end].strip()
+        # markers count only at a line start, after the abstract's own line (the words also occur in running text)
+        first, _, rest = abstract.partition("\n")
+        cut = _ARXIV_CUT_RE.search(rest)
+        abstract = (first + "\n" + rest[:cut.start()] if cut else abstract).strip()
         head = text[:start]
         title = re.search(r"^\s*Title:.*$", head, re.M)
         submitted = re.search(r"^\s*\[Submitted on[^\n]*$", head, re.M)
         lines = [m.group(0).strip() for m in (title, submitted) if m] + [abstract]
+        # without a title or submitted line only the abstract was found: not a page we understand, keep the raw text
         return "\n".join(lines) if len(lines) > 1 else text
     except Exception:  # cleaning is best effort; the raw text is always usable
         return text
