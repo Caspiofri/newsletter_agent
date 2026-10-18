@@ -20,7 +20,7 @@ class DigestState(TypedDict):
     extra_articles: Annotated[list[Article], operator.add]
     top_articles: list[Article]
     # evidence for the trace; each node after merge writes {**state.get("run_stats", {}), ...}
-    run_stats: dict[str, int]
+    run_stats: dict[str, float]
     dedupe_drops: list[dict]
     rank_scores: list[dict]
     newsletter_data: Optional[NewsletterData]

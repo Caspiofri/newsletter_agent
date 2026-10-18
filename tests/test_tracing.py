@@ -75,6 +75,11 @@ def test_summary_feedback_items_one_per_stat():
     assert items == [{"key": "stat.merged", "score": 10}, {"key": "stat.picked", "score": 2}]
 
 
+def test_summary_feedback_items_accepts_float_stats():
+    items = tracing.summary_feedback_items({"stats": {"dedupe_max_similarity": 0.934, "picked": 2}})
+    assert items == [{"key": "stat.dedupe_max_similarity", "score": 0.934}, {"key": "stat.picked", "score": 2}]
+
+
 def test_judge_and_post_survives_judge_failure():
     rt = MagicMock()
     rt.id = "run-1"

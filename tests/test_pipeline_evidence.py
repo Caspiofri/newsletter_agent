@@ -63,16 +63,68 @@ def test_filter_seen_still_returns_survivors():
 
 def test_dedupe_node_records_drops_and_stats():
     arts = [_art("Dup"), _art("Near"), _art("New")]
-    drops = [{"title": "Dup", "dropped": True}, {"title": "Near", "dropped": False}]
+    drops = [{"title": "Dup", "similarity": 0.9, "dropped": True}, {"title": "Near", "similarity": 0.78, "dropped": False}]
     state = {"digest_name": "My Digest", "articles": arts, "run_stats": {"merged": 3}}
     with patch.object(article_store, "filter_seen_detailed", return_value=(arts[1:], drops)):
         out = nodes.dedupe_articles(state)
     assert out["articles"] == arts[1:] and out["dedupe_drops"] == drops
-    assert out["run_stats"] == {"merged": 3, "after_dedupe": 2, "dedupe_dropped": 1}
+    assert out["run_stats"] == {"merged": 3, "after_dedupe": 2, "dedupe_dropped": 1, "dedupe_matches": 1,
+                                "dedupe_near_misses": 1, "dedupe_batch_duplicates": 0,
+                                "dedupe_max_similarity": 0.9}
     # partial state without run_stats must not break
     with patch.object(article_store, "filter_seen_detailed", return_value=(arts, [])):
         out = nodes.dedupe_articles({"digest_name": "d", "articles": arts})
-    assert out["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0}
+    assert out["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0, "dedupe_matches": 0,
+                                "dedupe_near_misses": 0, "dedupe_batch_duplicates": 0,
+                                "dedupe_max_similarity": 0.0}
+
+
+def _match(title, similarity, dropped):
+    return {"title": title, "url": "u", "similarity": similarity, "matched_title": f"old {title}",
+            "matched_sent_on": "2026-10-17", "dropped": dropped}
+
+
+def test_dedupe_node_records_match_near_miss_batch_and_max():
+    arts = [_art(f"A{i}") for i in range(6)]
+    matches = [_match("A0", 0.91, True), _match("A1", 0.97, True), _match("A2", 0.85, True),
+               _match("A3", 0.78, False)]
+    with patch.object(article_store, "filter_seen_detailed", return_value=(arts[:2], matches)):
+        out = nodes.dedupe_articles({"digest_name": "d", "articles": arts})
+    stats = out["run_stats"]
+    assert stats["dedupe_dropped"] == 4
+    assert stats["dedupe_matches"] == 3
+    assert stats["dedupe_near_misses"] == 1
+    assert stats["dedupe_batch_duplicates"] == 1
+    assert stats["dedupe_max_similarity"] == 0.97
+
+
+def test_dedupe_max_similarity_zero_without_matches():
+    arts = [_art("A"), _art("B")]
+    near = [_match("A", 0.79, False)]
+    with patch.object(article_store, "filter_seen_detailed", return_value=(arts, near)):
+        out = nodes.dedupe_articles({"digest_name": "d", "articles": arts})
+    assert out["run_stats"]["dedupe_max_similarity"] == 0.0
+    assert out["run_stats"]["dedupe_near_misses"] == 1
+
+
+def test_dedupe_trace_inputs_lists_titles_not_articles():
+    out = article_store._dedupe_trace_inputs({"articles": [_art("A"), _art("B")], "profile": "p", "days": 5})
+    assert out == {"queries": ["A", "B"], "window_days": 5}
+    default = article_store._dedupe_trace_inputs({"articles": [_art("A")], "profile": "p"})
+    assert default == {"queries": ["A"], "window_days": article_store.DEDUPE_DAYS}
+    assert article_store._dedupe_trace_inputs({}) == {"queries": [], "window_days": article_store.DEDUPE_DAYS}
+
+
+def test_dedupe_trace_outputs_shape():
+    matches = [_match("A", 0.9, True), _match("B", 0.8, False)]
+    out = article_store._dedupe_trace_outputs(([], matches))
+    assert out == {"documents": [
+        {"page_content": "old A", "metadata": {"query_title": "A", "similarity": 0.9,
+                                                "matched_sent_on": "2026-10-17", "dropped": True}},
+        {"page_content": "old B", "metadata": {"query_title": "B", "similarity": 0.8,
+                                                "matched_sent_on": "2026-10-17", "dropped": False}},
+    ]}
+    assert article_store._dedupe_trace_outputs(([], [])) == {"documents": []}
 
 
 def _rank_state(cands, run_stats=None):
@@ -120,7 +172,9 @@ def test_run_stats_accumulate_across_nodes():
         state.update(nodes.read_articles(state))
     resp = json.dumps([{"id": i, "score": 7 - i, "reason": "r"} for i in range(3)])
     state.update(_rank(state["candidates"], resp, state["run_stats"]))
-    assert state["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0, "shortlisted": 3,
+    assert state["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0, "dedupe_matches": 0,
+                                  "dedupe_near_misses": 0, "dedupe_batch_duplicates": 0,
+                                  "dedupe_max_similarity": 0.0, "shortlisted": 3,
                                   "read_full": 3, "read_partial": 0, "read_snippet": 0,
                                   "ranked": 3, "picked": 1}, state["run_stats"]
 

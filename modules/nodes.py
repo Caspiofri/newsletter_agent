@@ -364,7 +364,11 @@ def dedupe_articles(state: DigestState) -> dict:
     dropped = len(state["articles"]) - len(unseen)
     if dropped:
         print(f"[dedupe] Dropped {dropped} article(s) seen in the last {article_store.DEDUPE_DAYS} days.")
-    stats = {**state.get("run_stats", {}), "after_dedupe": len(unseen), "dedupe_dropped": dropped}
+    hits = [m for m in matches if m["dropped"]]
+    stats = {**state.get("run_stats", {}), "after_dedupe": len(unseen), "dedupe_dropped": dropped,
+             "dedupe_matches": len(hits), "dedupe_near_misses": len(matches) - len(hits),
+             "dedupe_batch_duplicates": max(0, dropped - len(hits)),
+             "dedupe_max_similarity": round(max((m["similarity"] for m in hits), default=0.0), 3)}
     return {"articles": unseen, "dedupe_drops": matches, "run_stats": stats}
 
 

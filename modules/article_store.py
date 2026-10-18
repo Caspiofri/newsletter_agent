@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import numpy as np
 from bs4 import BeautifulSoup
 from chromadb import PersistentClient
+from langsmith import traceable
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 from config.settings import CHROMA_PATH, DEDUPE_NEAR_MISS_MIN
@@ -101,6 +102,24 @@ def _sent_on(date_int) -> str:
     return f"{text[:4]}-{text[4:6]}-{text[6:8]}" if len(text) == 8 else ""
 
 
+def _dedupe_trace_inputs(inputs: dict) -> dict:
+    """Show titles and the window in the trace instead of Article objects."""
+    return {"queries": [a.name for a in inputs.get("articles", [])],
+            "window_days": inputs.get("days", DEDUPE_DAYS)}
+
+
+def _dedupe_trace_outputs(result) -> dict:
+    """Show the lookup as scored documents: the matched sent title with its similarity."""
+    _, matches = result
+    return {"documents": [{
+        "page_content": m["matched_title"],
+        "metadata": {"query_title": m["title"], "similarity": m["similarity"],
+                     "matched_sent_on": m["matched_sent_on"], "dropped": m["dropped"]},
+    } for m in matches]}
+
+
+@traceable(run_type="retriever", name="dedupe_lookup",
+           process_inputs=_dedupe_trace_inputs, process_outputs=_dedupe_trace_outputs)
 def filter_seen_detailed(articles: list[Article], profile: str,
                          days: int = DEDUPE_DAYS) -> tuple[list[Article], list[dict]]:
     """Survivors plus one record per article whose nearest sent article is a near-miss or a duplicate."""
