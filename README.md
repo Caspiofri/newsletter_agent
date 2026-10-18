@@ -2,7 +2,7 @@
 
 An end-to-end multi-source AI pipeline. Parallel collectors gather articles from your Gmail newsletters, Medium tag feeds and Hacker News; a reader fetches the full text of a shortlist; an LLM ranker picks the best; and a personalized Hebrew digest is delivered to your inbox — fully automated, daily.
 
-Built with LangGraph, Google Gemini 2.5, and a multi-criteria LLM-as-judge eval harness.
+Built with LangGraph and Google Gemini 2.5. Each run is judged by Claude Haiku 4.5, a different model family from the writer and ranker, and traced in LangSmith. A multi-criteria LLM-as-judge eval harness covers offline checks.
 
 ---
 
@@ -66,10 +66,10 @@ flowchart TD
 | `collect_hackernews` | Recent, well-voted Hacker News stories for the configured queries (Algolia API) |
 | `merge` | Join point: de-duplicates by URL, classifies every link, and replaces a bad link with a direct link to the same story from another source |
 | `dedupe` | ChromaDB vector search — drops articles already sent within the last 3 days, before they can take a shortlist slot |
-| `shortlist` | Gemini title screen run separately per source (quota per source), so one noisy source cannot crowd out the others |
+| `shortlist` | Gemini title screen run separately per source (quota per source), so one noisy source cannot crowd out the others. Gemini picks articles by integer id, so a title can no longer be invented or mismatched |
 | `reader` | Fetches full article text for the shortlist in parallel (`trafilatura`). Marks each `full`, `partial` or `snippet` |
 | `rank` | One Gemini call scores each candidate 0-10 on its content and source (curated newsletter, unvetted Medium feed, HN points). Articles read only as a snippet are capped at 6 in code |
-| `summarize` | Gemini writes full newsletter JSON → rendered to HTML. A link that is dead or cannot be verified renders as a gray, disabled button |
+| `summarize` | Gemini reads up to `READ_MAX_CHARS` (6000) characters of each article (via the shared `article_text()`) and writes full newsletter JSON → rendered to HTML. Cards reference articles by integer id and `card_resolver.resolve_cards` maps each id to the real URL, so a URL cannot be invented. Cards of Medium or Hacker News articles that were only read as a snippet are demoted to one-line brief items (inbox articles are exempt). A link that is dead or cannot be verified renders as a gray, disabled button |
 | `send_email` | Gmail API sends the HTML digest; stores articles in ChromaDB only on success |
 | `no_content` | Terminal node when no sendable articles exist |
 
@@ -143,6 +143,8 @@ python -m evals.import_labels output/ranking_labels_ai_<run>.json
 
 `evals/eval.py` tests nodes in isolation against fixtures. `modules/trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.
 
+The judge sees exactly the text the summarizer saw (the same `article_text()`), judges each card against its own source article by id, and runs on Claude (`JUDGE_MODEL_DAILY`, `claude-haiku-4-5`) rather than Gemini. Its scores and reasoning are posted to LangSmith as feedback (see Monitoring). `JUDGE_MODEL_EVAL` (`claude-sonnet-5-5`) is the stronger judge for on-demand evals.
+
 It scores three stages on a 1–5 scale:
 
 | Stage | Method | What it measures |
@@ -179,8 +181,18 @@ Every Gemini call is wrapped in **tenacity** — 3 retries with exponential back
 
 The pipeline runs unattended via cron (`0 7 * * *`, daily). Two layers catch failures:
 
-- **LangSmith tracing** — every graph run is traced end-to-end (`LANGCHAIN_TRACING` / `LANGCHAIN_PROJECT` in `.env`), so a run's node-by-node behavior is inspectable after the fact.
+- **LangSmith tracing** — every graph run is traced end-to-end (`LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT` in `.env`), so a run's node-by-node behavior is inspectable after the fact.
 - **healthchecks.io dead-man's-switch** — `main.py` pings `HEALTHCHECK_PING_URL` after every run: a plain ping on success, `/fail` (with the error or failed profile) on a crash, graph timeout, or `email_status == "failed"`. The check has a 60-minute grace period, so if the run never happens at all — for example the host machine is down — healthchecks.io alerts on the *missing* ping, which nothing running on the host itself could otherwise detect.
+
+### What you can see in LangSmith
+
+- **One `digest_run` trace per day**, tagged `digest_run` and the profile. It contains the node runs, every `gemini` call, and the `trace_judge` / `judge_llm` calls.
+- **Feedback on that root run:** `judge.filter_quality`, `judge.content_faithfulness` and `judge.overall` (the judge's scores, with reasoning as the comment), plus `stat.<name>` for each pipeline stage count: `stat.merged`, `stat.after_dedupe`, `stat.dedupe_dropped`, `stat.shortlisted`, `stat.read_full`, `stat.read_partial`, `stat.read_snippet`, `stat.ranked`, `stat.picked`, `stat.cards`, `stat.brief_items`. Add the feedback keys as columns in the runs table.
+- **Root run metadata `run_summary`:** the picked titles, the ranker's scores and reasons for every candidate, and the dedupe drops.
+
+`stat.dedupe_dropped` counts every article the dedupe step removed, including duplicates within one batch. `run_summary.dedupe_drops` lists only matches against previously sent stories and near-misses, each with its similarity, the matched sent article and its send date; `dropped: true` means the similarity was at or above the threshold.
+
+Prompts are recorded, so article and newsletter text is uploaded to LangSmith.
 
 ---
 
@@ -190,6 +202,8 @@ The pipeline runs unattended via cron (`0 7 * * *`, daily). Two layers catch fai
 |---|---|---|
 | Orchestration | LangGraph | Stateful graph with parallel fan-out/fan-in, conditional edges and checkpointing |
 | LLM | Gemini 2.5 Flash | Extended thinking budget for the summarize step; cost-effective for daily runs |
+| Trace judge | Claude Haiku 4.5 (`claude-haiku-4-5`) | A different model family from the writer and ranker, so the judge does not grade its own work; cheap enough for every run |
+| Observability | LangSmith | One `digest_run` trace per day with judge scores and stage counts as feedback |
 | Email | Gmail API (OAuth 2.0) | Native read + send from an existing inbox, no extra infra |
 | Data modeling | Pydantic | Structured LLM output that fails loudly on schema violations |
 | Deduplication | ChromaDB + sentence-transformers | Vector similarity dedupe prevents resending articles seen in the last 3 days |
@@ -206,6 +220,8 @@ The pipeline runs unattended via cron (`0 7 * * *`, daily). Two layers catch fai
 - Google Cloud project with Gmail API enabled
 - `config/credentials.json` (OAuth 2.0 Desktop App) from the Cloud Console
 - Gemini API key
+- Anthropic API key (for the Claude trace judge)
+- LangSmith API key (optional, for tracing)
 
 ### Install
 
@@ -220,6 +236,8 @@ Copy `.env.example` and fill in your values:
 ```bash
 cp .env.example .env
 ```
+
+`.env.example` also lists `ANTHROPIC_API_KEY` (the trace judge) and the LangSmith variables `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY` and `LANGSMITH_PROJECT`. `requirements.txt` includes `anthropic` and `langsmith`.
 
 The active collectors have defaults in `config/settings.py`. Override them per profile in `.env` with comma-separated lists, for example `AI_MEDIUM_TAGS=ai-agents,llm,rag` and `AI_HN_QUERIES=LLM,AI agents`. Shortlist quotas, the minimum rank score and the snippet cap are in the same file.
 
@@ -242,6 +260,10 @@ python main.py
 │   ├── nodes.py          # Node implementations (fetch, extract, collect, merge, dedupe, shortlist, rank, summarize, send)
 │   ├── collectors/       # Active sources: medium.py (tag RSS), hackernews.py (Algolia API)
 │   ├── reader.py         # Full-text fetching for shortlisted articles
+│   ├── article_text.py   # article_text(): the one text view of an article, shared by the summarizer and the judge
+│   ├── card_resolver.py  # Maps summarizer ids to real URLs, drops bad/duplicate ids, demotes snippet-only external cards
+│   ├── judge_llm.py      # Claude transport for the trace judge (JUDGE_MODEL_DAILY / JUDGE_MODEL_EVAL)
+│   ├── tracing.py        # LangSmith feedback and run_summary metadata for the digest_run root run
 │   ├── ranking_report.py # Ranking report + HTML labeling page
 │   ├── state.py          # DigestState TypedDict — shared across all nodes
 │   ├── models.py         # Article, ArticleCard, NewsletterData Pydantic models
@@ -251,7 +273,7 @@ python main.py
 │   └── trace_judge.py    # Per-run LLM-as-judge with 3-stage scoring
 ├── config/               # settings.py (all paths) + credentials.json, token.json, service_account.json (git-ignored)
 ├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json, import_labels.py
-├── tests/                # Offline unit tests — python -m tests.test_link_utils, python -m tests.test_collectors
+├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing (each via `python -m tests.<name>`)
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)
 ├── docs/                 # Screenshots
