@@ -19,21 +19,14 @@ Usage:
 
 import json
 import os
-import re
 from dataclasses import dataclass, asdict
 from datetime import datetime
 
-import google.auth
-from google import genai
-
-from config.settings import OUTPUT_DIR
+from config.settings import JUDGE_MODEL_DAILY, OUTPUT_DIR
 from modules.article_text import article_text
+from modules.judge_llm import judge_llm, parse_judge_json
 from modules.models import Article, NewsletterData
 
-
-
-_credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-_client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
 
 SKIPPED = "skipped"
 
@@ -59,7 +52,7 @@ class TraceReport:
 # LLM judge helper
 # ---------------------------------------------------------------------------
 
-def _llm_judge(criterion: str, rubric: str, content: str) -> dict:
+def _llm_judge(criterion: str, rubric: str, content: str, model: str = JUDGE_MODEL_DAILY) -> dict:
     """Return {"score": int 1-5, "reasoning": str}."""
     prompt = f"""You are a strict pipeline quality evaluator.
 Score the following criterion from 1 to 5 and give a one-sentence justification.
@@ -73,16 +66,7 @@ Rubric:
 Content to evaluate:
 {content}"""
 
-    response = _client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={"max_output_tokens": 2048},
-    )
-    text = response.text.strip()
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON in judge response: {text!r}")
-    return json.loads(match.group())
+    return parse_judge_json(judge_llm(prompt, model))
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +160,7 @@ def _judge_filter_quality(
 def _judge_content_faithfulness(
     top_articles: list[Article],
     newsletter_data: NewsletterData,
+    model: str | None = None,
 ) -> StageScore:
     if not newsletter_data or not newsletter_data.cards:
         return StageScore(
@@ -205,6 +190,7 @@ def _judge_content_faithfulness(
             "1 = multiple invented facts not present in the source articles."
         ),
         content=paired_content,
+        model=model or JUDGE_MODEL_DAILY,
     )
 
     return StageScore(

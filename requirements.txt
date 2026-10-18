@@ -11,3 +11,5 @@ chromadb
 sentence-transformers
 trafilatura
 lxml_html_clean
+anthropic
+langsmith

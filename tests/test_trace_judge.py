@@ -1,9 +1,7 @@
 """Offline tests for the faithfulness judge. Run from the repo root: python -m tests.test_trace_judge"""
 from unittest.mock import patch
 
-# trace_judge builds a Vertex client at import; patch it so tests need no credentials
-with patch("google.auth.default", return_value=(object(), "p")), patch("google.genai.Client"):
-    from modules import trace_judge
+from modules import trace_judge
 
 from modules.article_text import article_text
 from modules.models import Article, ArticleCard, NewsletterData
@@ -23,7 +21,7 @@ def _card(id, brief):
 def _run(articles, cards):
     seen = {}
 
-    def fake(criterion, rubric, content):
+    def fake(criterion, rubric, content, model):
         seen["content"] = content
         return {"score": 4, "reasoning": "ok"}
 

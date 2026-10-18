@@ -27,3 +27,7 @@ SHORTLIST_QUOTA = {"inbox": 10, "hackernews": 6, "medium": 6}
 READ_MAX_CHARS = 6000
 RANK_MIN_SCORE = 5
 SNIPPET_SCORE_CAP = 6  # an article we could only read a teaser of cannot score above this
+
+# LLM judge models (Claude, so the judge is not the same family as the ranker and writer)
+JUDGE_MODEL_DAILY = "claude-haiku-4-5"  # per-run trace judge: cheap, runs every digest
+JUDGE_MODEL_EVAL = "claude-sonnet-5-5"  # golden-set evals: stronger judge, run on demand
