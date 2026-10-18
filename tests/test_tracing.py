@@ -72,12 +72,50 @@ def test_run_summary_reads_final_state_and_tolerates_missing_keys():
 
 def test_summary_feedback_items_one_per_stat():
     items = tracing.summary_feedback_items({"stats": {"merged": 10, "picked": 2}})
-    assert items == [{"key": "stat.merged", "score": 10}, {"key": "stat.picked", "score": 2}]
+    assert items == [{"key": "count.articles_collected_merged", "score": 10},
+                     {"key": "count.final_picked_articles", "score": 2}]
 
 
 def test_summary_feedback_items_accepts_float_stats():
     items = tracing.summary_feedback_items({"stats": {"dedupe_max_similarity": 0.934, "picked": 2}})
-    assert items == [{"key": "stat.dedupe_max_similarity", "score": 0.934}, {"key": "stat.picked", "score": 2}]
+    assert items == [{"key": "metric.dedupe_max_similarity", "score": 0.934},
+                     {"key": "count.final_picked_articles", "score": 2}]
+
+
+def test_summary_feedback_uses_count_and_metric_prefixes():
+    stats = {k: 1 for k in tracing.FEEDBACK_KEY_NAMES}
+    keys = {i["key"] for i in tracing.summary_feedback_items({"stats": stats})}
+    assert keys == set(tracing.FEEDBACK_KEY_NAMES.values())
+    assert [k for k in keys if k.startswith("metric.")] == ["metric.dedupe_max_similarity"]
+    assert all(k.startswith(("count.", "metric.")) for k in keys)
+
+
+def test_unknown_stat_key_posts_as_count():
+    items = tracing.summary_feedback_items({"stats": {"brand_new": 3}})
+    assert items == [{"key": "count.brand_new", "score": 3}]
+
+
+def test_no_stat_prefix_is_posted():
+    stats = {k: 1 for k in tracing.FEEDBACK_KEY_NAMES} | {"brand_new": 3}
+    assert not [i for i in tracing.summary_feedback_items({"stats": stats}) if i["key"].startswith("stat.")]
+
+
+def test_every_run_stats_key_is_mapped():
+    # Literal list of the keys modules/nodes.py writes into run_stats. A new run_stats key added in
+    # nodes.py must be added here AND to tracing.FEEDBACK_KEY_NAMES; adding it only here fails this test.
+    written = [
+        "merged",                                                         # merge_node
+        "after_dedupe", "dedupe_dropped", "dedupe_matches",               # dedupe_node
+        "dedupe_near_misses", "dedupe_batch_duplicates", "dedupe_max_similarity",
+        "shortlisted",                                                    # shortlist node
+        "read_full", "read_partial", "read_snippet",                      # read node (f"read_{s}")
+        "ranked", "picked",                                               # rank node
+        "cards", "brief_items",                                           # summarize node
+    ]
+    assert set(written) == set(tracing.FEEDBACK_KEY_NAMES)
+    src = open("modules/nodes.py").read()
+    for key in written:
+        assert f'"{key}"' in src or key.startswith("read_"), key
 
 
 def test_judge_and_post_survives_judge_failure():

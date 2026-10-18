@@ -23,8 +23,30 @@ def run_summary(result: dict) -> dict:
     }
 
 
+# run_stats key -> LangSmith feedback key. Counts get "count.", similarity measurements "metric.",
+# so they are not read as judge scores. An unmapped run_stats key posts as "count.<key>".
+FEEDBACK_KEY_NAMES: dict[str, str] = {
+    "merged": "count.articles_collected_merged",
+    "after_dedupe": "count.articles_after_dedupe",
+    "dedupe_dropped": "count.articles_dedupe_dropped",
+    "dedupe_matches": "count.dedupe_matches",
+    "dedupe_near_misses": "count.dedupe_near_misses",
+    "dedupe_batch_duplicates": "count.dedupe_batch_duplicates",
+    "dedupe_max_similarity": "metric.dedupe_max_similarity",
+    "shortlisted": "count.articles_shortlisted",
+    "read_full": "count.articles_read_full",
+    "read_partial": "count.articles_read_partial",
+    "read_snippet": "count.articles_read_snippet",
+    "ranked": "count.articles_ranked",
+    "picked": "count.final_picked_articles",
+    "cards": "count.cards",
+    "brief_items": "count.brief_items",
+}
+
+
 def summary_feedback_items(summary: dict) -> list[dict]:
-    return [{"key": f"stat.{k}", "score": v} for k, v in summary.get("stats", {}).items()]
+    return [{"key": FEEDBACK_KEY_NAMES.get(k, f"count.{k}"), "score": v}
+            for k, v in summary.get("stats", {}).items()]
 
 
 def _post(items: list[dict], run_id, client) -> None:
