@@ -476,7 +476,9 @@ CANDIDATES:
         print(f"[rank]{mark}{final[i]:>4}  {a.origin:<10} {a.read_status:<7} {a.name[:55]} — {reasons.get(i, '')[:60]}")
     try:  # the labeling report is a by-product; it must never break a run
         profile = state["digest_name"].lower().replace(" ", "_")
-        rows = ranking_report.build_rows(candidates, final, reasons, top, state["articles"], seed=str(date.today()))
+        rows = ranking_report.build_rows(
+            candidates, final, reasons, top, state["articles"], seed=str(date.today()),
+            read_sample=lambda arts: reader.read_articles(arts, max_chars=settings.READ_MAX_CHARS))
         print(f"[rank] Ranking report for labeling: {ranking_report.save(profile, rows)}")
     except Exception as e:
         print(f"[rank] could not write ranking report: {e}")

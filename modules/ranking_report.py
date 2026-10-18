@@ -23,10 +23,12 @@ def _row(a: Article, group: str, score=None, reason: str = "", picked: bool = Fa
 
 def build_rows(candidates: list[Article], final: dict[int, float], reasons: dict[int, str],
                picked: list[Article], pool: list[Article], sample_size: int = SAMPLE_SIZE,
-               seed: str = "") -> list[dict]:
+               seed: str = "", read_sample=None) -> list[dict]:
     """One row per shortlisted candidate (with the ranker's score) plus a seeded random sample of the rest.
 
-    The sample is what makes false negatives visible: stories the ranker never even saw.
+    The sample is what makes false negatives visible: stories the ranker never even saw. read_sample, when given,
+    fetches the full text of just the sampled articles so they can be judged from the article, not a teaser;
+    it only feeds this report, never the ranker.
     """
     picked_ids = {id(a) for a in picked}
     rows = [
@@ -36,6 +38,14 @@ def build_rows(candidates: list[Article], final: dict[int, float], reasons: dict
     seen_urls = {a.url for a in candidates}
     rest = [a for a in pool if a.url not in seen_urls]
     sample = random.Random(seed).sample(rest, min(sample_size, len(rest)))
+    if read_sample is not None:
+        try:
+            read = read_sample(sample)
+            if len(read) != len(sample):
+                raise ValueError(f"read {len(read)} of {len(sample)} articles")
+            sample = read
+        except Exception as e:
+            print(f"[rank] could not read sample text: {e}")
     return rows + [_row(a, "sample") for a in sample]
 
 

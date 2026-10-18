@@ -132,7 +132,7 @@ python -m evals.eval
 
 ### Ranking ground truth (labeling report)
 
-Every run writes `output/ranking_<profile>_<timestamp>.html` (plus a `.json`): every candidate the ranker scored, plus a seeded random sample of articles it never saw, so false negatives are visible. Open the page in a browser and rate each article **Must-read / Worth it / Skip** with an optional reason (including `full text mattered`, for articles whose title or opening did not show their value). It hides the ranker's scores until you tick "show ranker score and picks", so your labels are not anchored by them, and it shows the text snapshot the ranker saw. Progress is kept in the browser. "Export labels" downloads a JSON file, which you merge into the golden set:
+Every run writes `output/ranking_<profile>_<timestamp>.html` (plus a `.json`): every candidate the ranker scored, plus a seeded random sample of articles it never saw, so false negatives are visible. Open the page in a browser and rate each article **Must-read / Worth it / Skip** with an optional reason (including `full text mattered`, for articles whose title or opening did not show their value). It hides the ranker's scores until you tick "show ranker score and picks", so your labels are not anchored by them, and it shows the text snapshot the ranker saw. The random sample rows instead carry the article text fetched for the report (their `text:` chip shows full/partial/snippet), so labels for the sample can be judged from the article itself. Progress is kept in the browser. "Export labels" downloads a JSON file, which you merge into the golden set:
 
 ```bash
 python -m evals.import_labels output/ranking_labels_ai_<run>.json

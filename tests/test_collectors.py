@@ -199,6 +199,61 @@ def test_ranking_report_rows_and_html():
     assert len(data["items"]) == 12 and data["items"][0]["title"].startswith("evil")
 
 
+def _sample_pool():
+    cands = [_art("top", "https://x.example/1", "inbox"), _art("mid", "https://x.example/2", "medium")]
+    return cands, cands + [_art(f"other{i}", f"https://o.example/{i}", "inbox") for i in range(30)]
+
+
+def _fake_read(arts):
+    return [a.model_copy(update={"content": "full article text " * 50, "read_status": "full"}) for a in arts]
+
+
+def test_sample_rows_get_read_text():
+    from modules import ranking_report
+    cands, pool = _sample_pool()
+    rows = ranking_report.build_rows(cands, {0: 9, 1: 5}, {}, [cands[0]], pool, sample_size=10, seed="s", read_sample=_fake_read)
+    sample = [r for r in rows if r["group"] == "sample"]
+    assert len(sample) == 10 and all(r["read_status"] == "full" and r["content"].startswith("full article") for r in sample)
+    short = [r for r in rows if r["group"] == "shortlisted"]
+    assert all(r["read_status"] == "snippet" and r["content"] == "c" for r in short)
+
+
+def test_sample_selection_is_unchanged_by_reading():
+    from modules import ranking_report
+    cands, pool = _sample_pool()
+    plain = ranking_report.build_rows(cands, {}, {}, [], pool, sample_size=10, seed="s")
+    read = ranking_report.build_rows(cands, {}, {}, [], pool, sample_size=10, seed="s", read_sample=_fake_read)
+    assert [r["url"] for r in read] == [r["url"] for r in plain]
+
+
+def test_read_sample_failure_keeps_teaser():
+    from modules import ranking_report
+    cands, pool = _sample_pool()
+
+    def boom(arts):
+        raise RuntimeError("network down")
+
+    def short(arts):
+        return arts[:1]
+    for bad in (boom, short):
+        rows = ranking_report.build_rows(cands, {}, {}, [], pool, sample_size=10, seed="s", read_sample=bad)
+        sample = [r for r in rows if r["group"] == "sample"]
+        assert len(sample) == 10 and all(r["content"] == "c" and r["read_status"] == "snippet" for r in sample)
+
+
+def test_read_sample_only_called_with_sample_articles():
+    from modules import ranking_report
+    cands, pool = _sample_pool()
+    seen = []
+
+    def spy(arts):
+        seen.append(list(arts))
+        return arts
+    rows = ranking_report.build_rows(cands, {}, {}, [], pool, sample_size=10, seed="s", read_sample=spy)
+    assert len(seen) == 1 and [a.url for a in seen[0]] == [r["url"] for r in rows if r["group"] == "sample"]
+    assert not {a.url for a in seen[0]} & {a.url for a in cands}
+
+
 def test_import_labels_merges_by_url():
     from evals import import_labels
     golden = [{"url": "https://a", "label": "skip", "title": "A"}]
