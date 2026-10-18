@@ -130,6 +130,15 @@ python -m evals.eval
 # Results printed as a table and saved to output/eval_<timestamp>.json
 ```
 
+### Ranking ground truth (labeling report)
+
+Every run writes `output/ranking_<profile>_<timestamp>.html` (plus a `.json`): every candidate the ranker scored, plus a seeded random sample of articles it never saw, so false negatives are visible. Open the page in a browser and rate each article **Must-read / Worth it / Skip** with an optional reason. It hides the ranker's scores until you tick "show ranker score and picks", so your labels are not anchored by them, and it shows the text snapshot the ranker saw. Progress is kept in the browser. "Export labels" downloads a JSON file, which you merge into the golden set:
+
+```bash
+python -m evals.import_labels output/ranking_labels_ai_<run>.json
+# -> evals/ranking_golden.json (keyed by URL, with a text snapshot so labels survive link rot)
+```
+
 ### Live trace judging (`modules/trace_judge.py`)
 
 `evals/eval.py` tests nodes in isolation against fixtures. `modules/trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.
@@ -233,6 +242,7 @@ python main.py
 │   ├── nodes.py          # Node implementations (fetch, extract, collect, merge, dedupe, shortlist, rank, summarize, send)
 │   ├── collectors/       # Active sources: medium.py (tag RSS), hackernews.py (Algolia API)
 │   ├── reader.py         # Full-text fetching for shortlisted articles
+│   ├── ranking_report.py # Ranking report + HTML labeling page
 │   ├── state.py          # DigestState TypedDict — shared across all nodes
 │   ├── models.py         # Article, ArticleCard, NewsletterData Pydantic models
 │   ├── gmail_client.py   # Gmail API wrapper (auth, read, send)
@@ -240,7 +250,7 @@ python main.py
 │   ├── article_store.py  # ChromaDB vector store — deduplication and article retention
 │   └── trace_judge.py    # Per-run LLM-as-judge with 3-stage scoring
 ├── config/               # settings.py (all paths) + credentials.json, token.json, service_account.json (git-ignored)
-├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json
+├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json, import_labels.py
 ├── tests/                # Offline unit tests — python -m tests.test_link_utils, python -m tests.test_collectors
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)

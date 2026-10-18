@@ -16,7 +16,7 @@ from modules.state import DigestState
 from config import settings
 from modules.collectors import hackernews, medium
 from modules.models import Article, NewsletterData
-from modules import gmail_client, article_store, link_utils, reader
+from modules import gmail_client, article_store, link_utils, ranking_report, reader
 
 
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
@@ -445,6 +445,12 @@ CANDIDATES:
         a = candidates[i]
         mark = "*" if id(a) in picked else " "
         print(f"[rank]{mark}{final[i]:>4}  {a.origin:<10} {a.read_status:<7} {a.name[:55]} — {reasons.get(i, '')[:60]}")
+    try:  # the labeling report is a by-product; it must never break a run
+        profile = state["digest_name"].lower().replace(" ", "_")
+        rows = ranking_report.build_rows(candidates, final, reasons, top, state["articles"], seed=str(date.today()))
+        print(f"[rank] Ranking report for labeling: {ranking_report.save(profile, rows)}")
+    except Exception as e:
+        print(f"[rank] could not write ranking report: {e}")
     return {"top_articles": top}
 
 

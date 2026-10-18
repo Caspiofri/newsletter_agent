@@ -152,6 +152,41 @@ def test_snippet_only_articles_are_capped():
     assert [a.name for a in nodes._select_top(scored, cands, 5, 7, snippet_cap=6)] == ["full"]
 
 
+def test_ranking_report_rows_and_html():
+    import json, re, tempfile
+    from pathlib import Path
+    from modules import ranking_report
+    cands = [_art("top", "https://x.example/1", "inbox"), _art("mid", "https://x.example/2", "medium")]
+    pool = cands + [_art(f"other{i}", f"https://o.example/{i}", "inbox") for i in range(30)]
+    rows = ranking_report.build_rows(cands, {0: 9, 1: 5}, {0: "great"}, [cands[0]], pool, sample_size=10, seed="s")
+    assert [r["group"] for r in rows] == ["shortlisted"] * 2 + ["sample"] * 10
+    assert rows[0]["picked"] and rows[0]["score"] == 9 and rows[0]["reason"] == "great" and not rows[1]["picked"]
+    assert not {r["url"] for r in rows[2:]} & {"https://x.example/1", "https://x.example/2"}  # sample never repeats shortlisted
+    again = ranking_report.build_rows(cands, {}, {}, [], pool, sample_size=10, seed="s")
+    assert [r["url"] for r in again[2:]] == [r["url"] for r in rows[2:]]  # seeded, so reproducible
+    rows[0]["title"] = "evil </script><b>x"
+    with tempfile.TemporaryDirectory() as d:
+        path = ranking_report.save("ai", rows, Path(d))
+        html = path.read_text(encoding="utf-8")
+        assert path.with_suffix(".json").exists()
+    assert html.count("</script>") == 2  # data block + code block; the injected one was escaped
+    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', html, re.S).group(1).replace("<\\/", "</"))
+    assert len(data["items"]) == 12 and data["items"][0]["title"].startswith("evil")
+
+
+def test_import_labels_merges_by_url():
+    from evals import import_labels
+    golden = [{"url": "https://a", "label": "skip", "title": "A"}]
+    exported = {"run_id": "r2", "labels": [
+        {"url": "https://a", "label": "must", "title": "A"},       # relabel
+        {"url": "https://b", "label": "worth", "title": "B"},      # new
+        {"url": "https://c", "label": "bogus", "title": "C"},      # invalid label ignored
+        {"url": "", "label": "must"}]}                              # no url ignored
+    merged, added, updated = import_labels.merge(golden, exported, "2026-10-02")
+    assert (added, updated) == (1, 1)
+    assert {g["url"]: g["label"] for g in merged} == {"https://a": "must", "https://b": "worth"}
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
