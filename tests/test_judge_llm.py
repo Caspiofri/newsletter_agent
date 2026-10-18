@@ -113,6 +113,94 @@ def test_faithfulness_forwards_model():
     assert seen["model"] == "x"
 
 
+def test_parse_ignores_text_and_braces_after_the_json():
+    text = '{"score": 4, "reasoning": "ok"}\n\nNote: {this} is extra }'
+    assert jl.parse_judge_json(text) == {"score": 4, "reasoning": "ok"}
+
+
+def test_parse_first_json_object_wins_when_two_are_present():
+    text = '{"score": 1, "reasoning": "a"} then {"score": 5, "reasoning": "b"}'
+    assert jl.parse_judge_json(text)["score"] == 1
+
+
+def test_parse_skips_a_leading_brace_that_is_not_json():
+    text = 'Note {see below} {"score": 4, "reasoning": "x"}'
+    assert jl.parse_judge_json(text) == {"score": 4, "reasoning": "x"}
+
+
+def test_parse_nested_braces_inside_reasoning_string():
+    text = '{"score": 3, "reasoning": "uses {braces} and } inside"} trailing'
+    assert jl.parse_judge_json(text)["reasoning"] == "uses {braces} and } inside"
+
+
+def test_parse_error_message_keeps_the_reply():
+    reply = "x{" * 400
+    try:
+        jl.parse_judge_json(reply)
+    except ValueError as e:
+        assert "No JSON in judge response" in str(e) and repr(reply[:500]) in str(e)
+        assert repr(reply) not in str(e)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_verdict_coerces_digit_string_and_float():
+    assert trace_judge._parse_verdict({"score": " 4 ", "reasoning": "r"}) == {"score": 4, "reasoning": "r"}
+    out = trace_judge._parse_verdict({"score": 4.0, "reasoning": "r"})
+    assert out["score"] == 4 and isinstance(out["score"], int)
+    assert trace_judge._parse_verdict({"score": 5, "reasoning": "r"})["score"] == 5
+
+
+def test_verdict_rejects_missing_out_of_range_and_non_string_reasoning():
+    bad = [
+        {"reasoning": "r"},
+        {"score": 0, "reasoning": "r"},
+        {"score": 6, "reasoning": "r"},
+        {"score": 4.5, "reasoning": "r"},
+        {"score": True, "reasoning": "r"},
+        {"score": "high", "reasoning": "r"},
+        {"score": 3},
+        {"score": 3, "reasoning": 7},
+    ]
+    for data in bad:
+        try:
+            trace_judge._parse_verdict(data)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {data!r}")
+
+
+def test_llm_judge_retries_once_then_succeeds():
+    replies = iter(["sorry, no json", '{"score": 2, "reasoning": "r"}'])
+    calls = []
+
+    def fake(prompt, model):
+        calls.append(prompt)
+        return next(replies)
+
+    with patch.object(trace_judge, "judge_llm", fake):
+        out = trace_judge._llm_judge("c", "r", "x")
+    assert out == {"score": 2, "reasoning": "r"}
+    assert len(calls) == 2 and calls[0] == calls[1]
+
+
+def test_llm_judge_raises_after_second_failure():
+    calls = []
+
+    def fake(prompt, model):
+        calls.append(prompt)
+        return '{"score": 9, "reasoning": "r"}'
+
+    with patch.object(trace_judge, "judge_llm", fake):
+        try:
+            trace_judge._llm_judge("c", "r", "x")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError")
+    assert len(calls) == 2
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

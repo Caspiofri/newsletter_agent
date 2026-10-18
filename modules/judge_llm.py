@@ -7,7 +7,6 @@ this module needs no API key.
 """
 
 import json
-import re
 
 from langsmith import run_helpers, traceable
 
@@ -40,9 +39,15 @@ def judge_llm(prompt: str, model: str = JUDGE_MODEL_DAILY, max_tokens: int = 102
 
 
 def parse_judge_json(text: str) -> dict:
-    """Extract the first {...} span from a judge reply and parse it."""
-    text = text.strip()
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON in judge response: {text!r}")
-    return json.loads(match.group())
+    """Return the first JSON object in a judge reply; text around or after it is ignored."""
+    decoder = json.JSONDecoder()
+    pos = text.find("{")
+    while pos != -1:
+        try:
+            obj, _ = decoder.raw_decode(text[pos:])
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict):
+            return obj
+        pos = text.find("{", pos + 1)
+    raise ValueError(f"No JSON in judge response: {text[:500]!r}")

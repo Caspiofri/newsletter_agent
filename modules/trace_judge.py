@@ -54,6 +54,25 @@ class TraceReport:
 # LLM judge helper
 # ---------------------------------------------------------------------------
 
+def _parse_verdict(data: dict) -> dict:
+    """Validate a parsed judge reply; return {"score": int 1-5, "reasoning": str} or raise ValueError."""
+    score = data.get("score")
+    if isinstance(score, bool):
+        raise ValueError(f"Judge score is not a number: {score!r}")
+    if isinstance(score, float) and score.is_integer():
+        score = int(score)
+    elif isinstance(score, str) and score.strip().isdigit():
+        score = int(score.strip())
+    if not isinstance(score, int):
+        raise ValueError(f"Judge score missing or not an integer: {score!r}")
+    if not 1 <= score <= 5:
+        raise ValueError(f"Judge score out of range 1-5: {score}")
+    reasoning = data.get("reasoning")
+    if not isinstance(reasoning, str):
+        raise ValueError(f"Judge reasoning missing or not a string: {reasoning!r}")
+    return {"score": score, "reasoning": reasoning}
+
+
 def _llm_judge(criterion: str, rubric: str, content: str, model: str = JUDGE_MODEL_DAILY) -> dict:
     """Return {"score": int 1-5, "reasoning": str}."""
     prompt = f"""You are a strict pipeline quality evaluator.
@@ -68,7 +87,11 @@ Rubric:
 Content to evaluate:
 {content}"""
 
-    return parse_judge_json(judge_llm(prompt, model))
+    # One retry on an unusable reply; API errors are not retried here.
+    try:
+        return _parse_verdict(parse_judge_json(judge_llm(prompt, model)))
+    except ValueError:
+        return _parse_verdict(parse_judge_json(judge_llm(prompt, model)))
 
 
 # ---------------------------------------------------------------------------
