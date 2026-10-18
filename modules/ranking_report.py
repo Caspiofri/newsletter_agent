@@ -120,7 +120,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <script>
 const D = JSON.parse(document.getElementById('data').textContent);
 const KEY = 'ranking-labels:' + D.run_id;
-const TAGS = ['', 'great primary source', 'practical / useful', 'beginner', 'promo', 'hype', 'off-topic', 'too thin', 'other'];
+const TAGS = ['', 'great primary source', 'practical / useful', 'beginner', 'promo', 'hype', 'off-topic', 'too thin', 'full text mattered', 'other'];
 let labels = {};
 try { labels = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(labels)); } catch (e) {} };

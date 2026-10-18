@@ -25,6 +25,8 @@ COLLECTOR_MAX_AGE_DAYS = 2
 # Ranking pipeline: how many candidates per source reach the reader/ranker, and the minimum ranker score to be included.
 SHORTLIST_QUOTA = {"inbox": 10, "hackernews": 6, "medium": 6}
 READ_MAX_CHARS = 6000
+RANK_TEXT_CHARS = 6000  # characters of each article the ranker reads (was a hard-coded 2500)
+SHORTLIST_TEASER_CHARS = 300  # characters of each article the title screen sees as a teaser (was none)
 RANK_MIN_SCORE = 5
 DEDUPE_NEAR_MISS_MIN = 0.70  # cosine similarity; dedupe matches at or above this are reported in the trace
 SNIPPET_SCORE_CAP = 6  # an article we could only read a teaser of cannot score above this

@@ -99,12 +99,15 @@ def fillter_articles(state: DigestState) -> dict:
     if len(good) >= top_k:
         articles = good
     articles_meta = [
-        {"id": i, "name": a.name, "author": a.author, "published_at": str(a.published_at)}
+        {"id": i, "name": a.name, "author": a.author, "published_at": str(a.published_at),
+         "teaser": article_text(a, settings.SHORTLIST_TEASER_CHARS)}
         for i, a in enumerate(articles)
     ]
     prompt = f"""You are a newsletter writer for a digest about {subject}.
     From these articles {json.dumps(articles_meta, ensure_ascii=False)}, select up to {top_k}
     that are GENUINELY on the subject of {subject}.
+    Each article has a short "teaser" (the start of its text). It is only a hint: judge relevance on the
+    title and teaser together; an empty teaser means none is available.
     EXCLUDE any article that is off-topic or only tangentially related — it is better to
     return fewer articles (or none at all) than to include irrelevant ones.
     If NONE of the articles are relevant to {subject}, return an empty array [].
@@ -436,7 +439,7 @@ def rank_articles(state: DigestState) -> dict:
             "title": a.name,
             "source": _SOURCE_DESCRIPTIONS.get(a.origin, a.origin) + (f" ({a.signal})" if a.signal else ""),
             "text_available": a.read_status,
-            "text": a.content[:2500],
+            "text": article_text(a, settings.RANK_TEXT_CHARS),
         }
         for i, a in enumerate(candidates)
     ]

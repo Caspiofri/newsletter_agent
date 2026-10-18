@@ -66,9 +66,9 @@ flowchart TD
 | `collect_hackernews` | Recent, well-voted Hacker News stories for the configured queries (Algolia API) |
 | `merge` | Join point: de-duplicates by URL, classifies every link, and replaces a bad link with a direct link to the same story from another source |
 | `dedupe` | ChromaDB vector search — drops articles already sent within the last 3 days, before they can take a shortlist slot |
-| `shortlist` | Gemini title screen run separately per source (quota per source), so one noisy source cannot crowd out the others. Gemini picks articles by integer id, so a title can no longer be invented or mismatched |
+| `shortlist` | Gemini title screen run separately per source (quota per source), so one noisy source cannot crowd out the others. Gemini picks articles by integer id, so a title can no longer be invented or mismatched. Each article also carries a short teaser of its text (`SHORTLIST_TEASER_CHARS`, 300) as a hint, so the screen does not judge on the title alone |
 | `reader` | Fetches full article text for the shortlist in parallel (`trafilatura`). Marks each `full`, `partial` or `snippet` |
-| `rank` | One Gemini call scores each candidate 0-10 on its content and source (curated newsletter, unvetted Medium feed, HN points). Articles read only as a snippet are capped at 6 in code |
+| `rank` | One Gemini call scores each candidate 0-10 on its content and source (curated newsletter, unvetted Medium feed, HN points). The ranker reads up to `RANK_TEXT_CHARS` (6000) characters of each article, HTML stripped. Articles read only as a snippet are capped at 6 in code |
 | `summarize` | Gemini reads up to `READ_MAX_CHARS` (6000) characters of each article (via the shared `article_text()`) and writes full newsletter JSON → rendered to HTML. Cards reference articles by integer id and `card_resolver.resolve_cards` maps each id to the real URL, so a URL cannot be invented. Cards of Medium or Hacker News articles that were only read as a snippet are demoted to one-line brief items (inbox articles are exempt). A link that is dead or cannot be verified renders as a gray, disabled button |
 | `send_email` | Gmail API sends the HTML digest; stores articles in ChromaDB only on success |
 | `no_content` | Terminal node when no sendable articles exist |
@@ -132,7 +132,7 @@ python -m evals.eval
 
 ### Ranking ground truth (labeling report)
 
-Every run writes `output/ranking_<profile>_<timestamp>.html` (plus a `.json`): every candidate the ranker scored, plus a seeded random sample of articles it never saw, so false negatives are visible. Open the page in a browser and rate each article **Must-read / Worth it / Skip** with an optional reason. It hides the ranker's scores until you tick "show ranker score and picks", so your labels are not anchored by them, and it shows the text snapshot the ranker saw. Progress is kept in the browser. "Export labels" downloads a JSON file, which you merge into the golden set:
+Every run writes `output/ranking_<profile>_<timestamp>.html` (plus a `.json`): every candidate the ranker scored, plus a seeded random sample of articles it never saw, so false negatives are visible. Open the page in a browser and rate each article **Must-read / Worth it / Skip** with an optional reason (including `full text mattered`, for articles whose title or opening did not show their value). It hides the ranker's scores until you tick "show ranker score and picks", so your labels are not anchored by them, and it shows the text snapshot the ranker saw. Progress is kept in the browser. "Export labels" downloads a JSON file, which you merge into the golden set:
 
 ```bash
 python -m evals.import_labels output/ranking_labels_ai_<run>.json
@@ -273,7 +273,7 @@ python main.py
 │   └── trace_judge.py    # Per-run LLM-as-judge with 3-stage scoring
 ├── config/               # settings.py (all paths) + credentials.json, token.json, service_account.json (git-ignored)
 ├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json, import_labels.py
-├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden (each via `python -m tests.<name>`)
+├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden (each via `python -m tests.<name>`)
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)
 ├── docs/                 # Screenshots
