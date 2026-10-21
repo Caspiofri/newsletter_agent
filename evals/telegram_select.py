@@ -70,6 +70,11 @@ def _teaser(content: str, limit: int = TEASER_CHARS) -> str:
     return (cut.rsplit(" ", 1)[0] if " " in cut else cut) + "…"
 
 
+def rating_markup() -> dict:
+    """One row of the three rating buttons."""
+    return {"inline_keyboard": [[{"text": t, "callback_data": f"rate:{label}"} for label, t in BUTTONS.items()]]}
+
+
 def format_message(row: dict, recheck: bool = False) -> tuple[str, dict]:
     """(HTML text, reply_markup) for one article message."""
     title = row.get("title") or row.get("url", "")
@@ -87,8 +92,7 @@ def format_message(row: dict, recheck: bool = False) -> tuple[str, dict]:
     text = "\n".join(lines + ["", link])
     if len(text) > MAX_TEXT - 40:  # an absurdly long URL: drop the link rather than fail the send
         text = "\n".join(lines)
-    markup = {"inline_keyboard": [[{"text": t, "callback_data": f"rate:{label}"} for label, t in BUTTONS.items()]]}
-    return text, markup
+    return text, rating_markup()
 
 
 def rated_markup_text(text: str, label: str) -> str:
