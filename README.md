@@ -158,6 +158,25 @@ If a loaded file holds labels that match no article in the page, a message says 
 
 Manual check (no automated test covers the page itself): label three articles with `1`, `2`, `3` and move with `n`, `p`, `u`; confirm the shortcuts do not fire while typing in the note or choosing a tag; export; clear the browser's site data for the page; load the file and confirm every label returns; load the same file a second time (it works again, the page resets the file input).
 
+#### Ranking eval
+
+Once labels are in `evals/ranking_golden.json`, measure the ranker against them, in this order:
+
+```bash
+python -m evals.import_labels <export.json>          # 1. merge the labels into the golden set
+python -m evals.label_audit                          # 2. check the set is fit to measure with
+python -m evals.rank_eval                            # 3. dry run: prints the plan, calls no model
+python -m evals.rank_eval --run                      # 4. scores with Gemini -> output/rank_eval_<timestamp>.json
+python -m evals.rank_compare <baseline.json> <candidate.json>   # 5. did a change help?
+```
+
+- **Label audit** (`evals/label_audit.py`): counts by label, source, group, `labeled_with`, read status and report, the train/test split sizes, articles labeled twice (same normalized title and source), and warnings when skips are under 15 percent, random-sample rows under 25 percent, labels come from fewer than 4 reports, fewer than half were judged from the full article, the set is under the target (80, `--target`), or duplicates exist. `--relabel <export.json>` compares a later labeling of some of the same articles: the share with the same label (shown once at least 5 are compared; aim for at least 80 percent) and a must/worth/skip confusion matrix.
+- **Replay** (`evals/rank_eval.py`): for each report (`source_run`) in the golden set, all its labeled articles are the candidate pool. They are scored with the production ranker prompt (`modules.nodes.score_candidates`, the same prompt and snippet cap as `rank_articles`) from the stored text snapshot, `--repeats` times (default 3), because the ranker is not deterministic. Options: `--split train|test|all` (default `train`), `--k 5`, `--text-chars` (default `RANK_TEXT_CHARS`), `--golden`, `--profile AI` (reads `<PROFILE>_SUBJECT`, `_AUDIENCE`, `_EXPERIENCE` from the environment). It prints a table per report and overall (mean ± spread, the population standard deviation over repeats), and precision of the picks per source.
+- **Cost**: without `--run` nothing is called; it prints the number of reports, labeled articles, model calls (reports x repeats) and a rough input size in characters. `--run` makes exactly that many Gemini calls. A repeat whose reply is unusable or scores fewer articles than it was given is counted as failed and left out of the means, never as 0.
+- **Metrics**: precision@k = picks labeled must-read or worth it, divided by the labeled picks in the top k. Recall@k is capped by what k can hold: must-reads in the top k divided by min(k, must-reads in the report), so a perfect ranker scores 1.0 even when a report has more must-reads than k. When k exceeds the report's articles, all of them are picks. A metric that is undefined for a report (no must-reads, or no labeled picks) prints `n/a` and is skipped in the overall mean.
+- **Train/test**: each label is assigned to train (75 percent) or test (25 percent; 60/20 of 80) by a stable hash of its normalized title and source, so the same article under two addresses stays on one side. Tune on `train` (the default). Score `--split test` once at the end of a tuning round, never to guide edits.
+- **Settings recorded**: each result file stores `settings` (k, repeats, text_chars, split, model, golden row count, profile, snippet cap, date). `rank_compare` prints, per metric, the difference of the overall means and whether it is `clear` (larger than the larger of the two spreads) or `within noise`, plus the settings that changed; it refuses two results with a different split, k or golden row count.
+
 ### Live trace judging (`modules/trace_judge.py`)
 
 `evals/eval.py` tests nodes in isolation against fixtures. `modules/trace_judge.py` complements it by judging a **real pipeline run** end-to-end — called automatically after every successful `graph.ainvoke()`.
@@ -294,8 +313,13 @@ python main.py
 ├── evals/                # Offline eval harness — eval.py, eval_golden.py, golden_set.json, import_labels.py
 │   ├── label_hub.py      # Labeling hub: one HTML page to grade articles from every ranking report (python -m evals.label_hub)
 │   ├── label_hub_template.html # The hub page (inline CSS/JS, pure-function logic tested through node)
-│   └── canonicalize_labels.py  # Rewrites redirect URLs in an exported labels file to the real article URLs
-├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden, test_canonicalize_labels, test_label_hub, test_reader_arxiv (each via `python -m tests.<name>`)
+│   ├── canonicalize_labels.py  # Rewrites redirect URLs in an exported labels file to the real article URLs
+│   ├── rank_split.py     # Stable 75/25 train/test split of the ranking labels
+│   ├── rank_metrics.py   # precision@k and capped recall@k
+│   ├── rank_eval.py      # Replays the labeled articles through the ranker (python -m evals.rank_eval [--run])
+│   ├── rank_compare.py   # Baseline vs candidate rank_eval result
+│   └── label_audit.py    # Label counts, warnings and relabel agreement
+├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden, test_canonicalize_labels, test_label_hub, test_reader_arxiv, test_rank_split, test_rank_metrics, test_rank_eval, test_rank_compare, test_label_audit (each via `python -m tests.<name>`)
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)
 ├── docs/                 # Screenshots
