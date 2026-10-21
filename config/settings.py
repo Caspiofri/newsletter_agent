@@ -34,3 +34,8 @@ SNIPPET_SCORE_CAP = 6  # an article we could only read a teaser of cannot score 
 # LLM judge models (Claude, so the judge is not the same family as the ranker and writer)
 JUDGE_MODEL_DAILY = "claude-haiku-4-5"  # per-run trace judge: cheap, runs every digest
 JUDGE_MODEL_EVAL = "claude-sonnet-5-5"  # golden-set evals: stronger judge, run on demand
+
+# Telegram rating bot (python -m evals.telegram_rater): non-digest articles sent per day next to the digest picks,
+# and how often one already-labeled article is re-sent for the self-consistency check
+TELEGRAM_EXTRA = 3
+TELEGRAM_RECHECK_EVERY_DAYS = 7
