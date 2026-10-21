@@ -25,13 +25,14 @@ from modules import gmail_client, article_store, link_utils, ranking_report, rea
 _credentials, _project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
 client = genai.Client(vertexai=True, project=_project, location="us-central1", credentials=_credentials)
 gmail = gmail_client.GmailClient()
+GEMINI_MODEL = "gemini-2.5-flash"  # recorded in evals.rank_eval results
 
 
 @traceable(run_type="llm", name="gemini")
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_gemini(contents: str, config: dict | None = None) -> str:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=GEMINI_MODEL,
         contents=contents,
         config=config or {},
     )
@@ -426,25 +427,21 @@ def _select_top(scored: list, candidates: list[Article], top_k: int, min_score: 
     return [candidates[i] for i in ranked[:top_k]]
 
 
-def rank_articles(state: DigestState) -> dict:
-    """One LLM call scores every candidate on its content and source; the best top_k become top_articles."""
-    candidates = state["candidates"]
-    if not candidates:
-        return {"top_articles": [], "rank_scores": [],
-                "run_stats": {**state.get("run_stats", {}), "ranked": 0, "picked": 0}}
-    top_k = int(state["top_k"])
+def build_rank_prompt(candidates: list[Article], subject, target_audience, experience_level,
+                      top_k: int, text_chars: int) -> str:
+    """The ranker prompt: every candidate with its source and the first text_chars of its text."""
     items = [
         {
             "id": i,
             "title": a.name,
             "source": _SOURCE_DESCRIPTIONS.get(a.origin, a.origin) + (f" ({a.signal})" if a.signal else ""),
             "text_available": a.read_status,
-            "text": article_text(a, settings.RANK_TEXT_CHARS),
+            "text": article_text(a, text_chars),
         }
         for i, a in enumerate(candidates)
     ]
-    prompt = f"""You are the editor of a daily digest about {state["subject"]}.
-Reader: {state["target_audience"]} ({state["experience_level"]}).
+    return f"""You are the editor of a daily digest about {subject}.
+Reader: {target_audience} ({experience_level}).
 
 Score each candidate article 0-10 for how much this reader would value reading it, judging the TEXT, not just the title.
 Reward: concrete engineering substance, primary sources (releases, papers, engineering blogs), novel results, practical techniques for RAG / agents / LLM systems.
@@ -458,7 +455,8 @@ Return ONLY a JSON array, no commentary: [{{"id": 0, "score": 7, "reason": "shor
 CANDIDATES:
 {json.dumps(items, ensure_ascii=False)}"""
 
-    text = _call_gemini(prompt)
+
+def _parse_rank_reply(text: str) -> list:
     match = re.search(r'\[.*\]', text or "", re.DOTALL)
     try:
         scored = json.loads(match.group()) if match else []
@@ -466,6 +464,34 @@ CANDIDATES:
         scored = []
     if not scored:
         raise ValueError(f"No usable scores in ranker response: {text!r}")
+    return scored
+
+
+def score_candidates(candidates: list[Article], subject, target_audience, experience_level, top_k: int,
+                     text_chars: int, snippet_cap: int | None = None, call=None) -> dict[int, float]:
+    """id -> final score from one ranker call, exactly as rank_articles scores (used by evals.rank_eval).
+
+    call defaults to _call_gemini, looked up at call time so tests can patch it. Raises ValueError on an
+    unusable reply, including one where no row has a valid id and score.
+    """
+    prompt = build_rank_prompt(candidates, subject, target_audience, experience_level, top_k, text_chars)
+    scored = _parse_rank_reply((call or _call_gemini)(prompt))
+    final = _final_scores(scored, candidates, settings.SNIPPET_SCORE_CAP if snippet_cap is None else snippet_cap)
+    if not final:
+        raise ValueError(f"No valid id/score rows in ranker response: {scored!r}")
+    return final
+
+
+def rank_articles(state: DigestState) -> dict:
+    """One LLM call scores every candidate on its content and source; the best top_k become top_articles."""
+    candidates = state["candidates"]
+    if not candidates:
+        return {"top_articles": [], "rank_scores": [],
+                "run_stats": {**state.get("run_stats", {}), "ranked": 0, "picked": 0}}
+    top_k = int(state["top_k"])
+    prompt = build_rank_prompt(candidates, state["subject"], state["target_audience"], state["experience_level"],
+                               top_k, settings.RANK_TEXT_CHARS)
+    scored = _parse_rank_reply(_call_gemini(prompt))
     final = _final_scores(scored, candidates, settings.SNIPPET_SCORE_CAP)
     top = _select_top(scored, candidates, top_k, settings.RANK_MIN_SCORE, settings.SNIPPET_SCORE_CAP)
     reasons = {r["id"]: r.get("reason", "") for r in scored if isinstance(r, dict) and isinstance(r.get("id"), int)}
