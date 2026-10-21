@@ -1,0 +1,19 @@
+# Telegram rating bot poller (python -m evals.telegram_rater poll), as a systemd user service.
+# Install:  mkdir -p ~/.config/systemd/user && cp deploy/telegram-rater.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload && systemctl --user enable --now telegram-rater
+#           sudo loginctl enable-linger $USER   # keep it running without a login session
+# Logs:     journalctl --user -u telegram-rater -f
+[Unit]
+Description=Newsletter agent Telegram rating bot (poll)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/ofri/agents/newsletter_agent
+ExecStart=/home/ofri/agents/newsletter_agent/.venv/bin/python -m evals.telegram_rater poll
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -115,5 +115,12 @@ async def main():
     else:
         _ping_healthcheck(ok=True)
 
+    # post today's articles to the Telegram rating bot; a bot failure never fails the digest or the healthcheck
+    try:
+        from evals import telegram_rater
+        telegram_rater.send_today()
+    except Exception as e:
+        print(f"[warn] Telegram rating bot: {e}")
+
 
 asyncio.run(main())

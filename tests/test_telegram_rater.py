@@ -1,9 +1,11 @@
 """Offline tests for the Telegram rating bot. Run from the repo root: python -m tests.test_telegram_rater
 No network and no real token: the Bot API is a callable passed in and faked."""
 import json
+import os
 import random
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import requests
 
@@ -313,6 +315,151 @@ def test_state_roundtrip_and_missing_file():
         telegram_rater.save_state(path, state)
         assert telegram_rater.load_state(path) == state
         assert [p.name for p in path.parent.iterdir()] == ["state.json"]  # no temp file left behind
+
+
+# ---- send, poll, CLI
+
+def _report(out, profile, ts, items):
+    path = out / f"ranking_{profile}_{ts}.json"
+    path.write_text(json.dumps({"profile": profile, "run_id": ts, "items": items}), encoding="utf-8")
+    return path
+
+
+def _report_items():
+    return [_item(f"https://p{i}", picked=True, score=8) for i in range(5)] + [
+        _item("https://near", score=4.5), _item("https://low", score=1), _item("https://s", group="sample")]
+
+
+def _sender(start=1):
+    """A sendMessage result with increasing message ids."""
+    ids = iter(range(start, start + 1000))
+    return lambda params: {"message_id": next(ids)}
+
+
+def test_todays_reports_latest_per_profile():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d)
+        _report(out, "ai_engineering_daily", "20261021_070001", [])
+        latest = _report(out, "ai_engineering_daily", "20261021_093000", [])
+        med = _report(out, "medical", "20261021_070500", [])
+        _report(out, "ai_engineering_daily", "20261020_070000", [])
+        (out / "ranking_labels_ai_20261021_080000.json").write_text("{}", encoding="utf-8")
+        (out / "ranking_ai_engineering_daily_20261021_093000.html").write_text("", encoding="utf-8")
+        assert sorted(telegram_rater.todays_reports(out, "2026-10-21")) == sorted([latest, med])
+        assert telegram_rater.todays_reports(out, "2026-10-22") == []
+
+
+def test_send_posts_selection_and_records_state():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        report = _report(d, "ai", "20261021_070000", _report_items())
+        golden = d / "golden.json"
+        golden.write_text(json.dumps([{"url": "https://p4", "label": "must", "source_run": "x"}]), encoding="utf-8")
+        api = FakeApi({"sendMessage": _sender()})
+        with patch.object(telegram_select, "pick_recheck", return_value=None):
+            n = telegram_rater.send([report], api, CHAT, d / "state.json", golden, TODAY)
+        assert n == 7 and api.methods() == ["sendMessage"] * 7
+        first = api.calls[0][1]
+        assert first["chat_id"] == CHAT and first["parse_mode"] == "HTML" and first["disable_web_page_preview"] is True
+        assert first["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "rate:must"
+        state = telegram_rater.load_state(d / "state.json")
+        assert [e["row"]["url"] for e in state["sent"].values()] == \
+            ["https://p0", "https://p1", "https://p2", "https://p3", "https://near", "https://low", "https://s"]
+        e = state["sent"]["1"]
+        assert e["source_run"] == "20261021_070000" and e["recheck"] is False and e["label"] is None
+        assert e["note"] == "" and e["text"] == first["text"]
+
+
+def test_send_skips_failed_article_and_continues():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        report = _report(d, "ai", "20261021_070000", _report_items())
+        ids = _sender()
+
+        def send_message(params):
+            if "p1" in params["text"]:
+                raise telegram_api.TelegramError("sendMessage: Bad Request: message is too long")
+            return ids(params)
+
+        api = FakeApi({"sendMessage": send_message})
+        with patch.object(telegram_select, "pick_recheck", return_value=None):
+            n = telegram_rater.send([report], api, CHAT, d / "state.json", d / "golden.json", TODAY)
+        assert n == 7 and len(api.calls) == 8
+        urls = [e["row"]["url"] for e in telegram_rater.load_state(d / "state.json")["sent"].values()]
+        assert "https://p1" not in urls and len(urls) == 7
+
+
+def test_send_does_not_resend_same_run():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        report = _report(d, "ai", "20261021_070000", _report_items())
+        api = FakeApi({"sendMessage": _sender()})
+        with patch.object(telegram_select, "pick_recheck", return_value=None):
+            assert telegram_rater.send([report], api, CHAT, d / "state.json", d / "golden.json", TODAY) == 8
+            assert telegram_rater.send([report], api, CHAT, d / "state.json", d / "golden.json", TODAY) == 0
+        assert len(api.calls) == 8
+
+
+def test_send_adds_one_recheck_when_due():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        reports = [_report(d, "ai", "20261021_070000", _report_items()),
+                   _report(d, "medical", "20261021_070500", [_item("https://m", picked=True, score=9)])]
+        golden = d / "golden.json"
+        golden.write_text(json.dumps([{"url": "https://g", "title": "Old one", "label": "worth", "origin": "inbox",
+                                       "group": "sample", "content": "old text", "source_run": "20261001_070000",
+                                       "ranker_picked": False, "ranker_score": None}]), encoding="utf-8")
+        api = FakeApi({"sendMessage": _sender()})
+        assert telegram_rater.send(reports, api, CHAT, d / "state.json", golden, TODAY) == 10
+        rechecks = [c for c in api.calls if "🔁 re-check" in c[1]["text"]]
+        assert len(rechecks) == 1 and "Old one" in rechecks[0][1]["text"] and "worth" not in rechecks[0][1]["text"]
+        state = telegram_rater.load_state(d / "state.json")
+        [entry] = [e for e in state["sent"].values() if e["recheck"]]
+        assert entry["row"]["url"] == "https://g" and entry["source_run"] == "20261001_070000"
+        assert state["last_recheck"] == TODAY
+        # not due again the same week
+        telegram_rater.send([_report(d, "ai", "20261021_090000", [_item("https://n", picked=True, score=9)])],
+                            api, CHAT, d / "state.json", golden, "2026-10-23")
+        assert sum("🔁 re-check" in c[1]["text"] for c in api.calls) == 1
+
+
+def test_poll_once_advances_offset():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        paths = _paths(d)
+        telegram_rater.save_state(d / "state.json", _state_with())
+        api = FakeApi({"getUpdates": [_tap("rate:worth", update_id=17), _msg("/progress", update_id=18)]})
+        telegram_rater.poll(api, CHAT, d / "state.json", paths, once=True, sleep=lambda s: None)
+        assert api.calls[0] == ("getUpdates", {"offset": 0, "timeout": 50,
+                                               "allowed_updates": ["message", "callback_query"]})
+        state = telegram_rater.load_state(d / "state.json")
+        assert state["offset"] == 19 and state["sent"]["100"]["label"] == "worth"
+        assert [g["label"] for g in _golden(paths)] == ["worth"]
+
+
+def test_poll_survives_api_error():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        results = iter([telegram_api.TelegramError("getUpdates: ConnectionError"), [_msg("/progress", update_id=3)]])
+
+        def get_updates(params):
+            r = next(results)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        slept = []
+        api = FakeApi({"getUpdates": get_updates})
+        telegram_rater.poll(api, CHAT, d / "state.json", _paths(d), once=True, sleep=slept.append)
+        assert slept == [5] and api.methods() == ["getUpdates", "getUpdates", "sendMessage"]
+        assert telegram_rater.load_state(d / "state.json")["offset"] == 4
+
+
+def test_cli_send_without_token_exits_zero():
+    env = {k: v for k, v in os.environ.items() if k not in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")}
+    with patch.dict(os.environ, env, clear=True), \
+            patch.object(telegram_rater, "make_api", side_effect=AssertionError("no API without a token")):
+        assert telegram_rater.main(["send"]) == 0
 
 
 if __name__ == "__main__":

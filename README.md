@@ -158,6 +158,24 @@ If a loaded file holds labels that match no article in the page, a message says 
 
 Manual check (no automated test covers the page itself): label three articles with `1`, `2`, `3` and move with `n`, `p`, `u`; confirm the shortcuts do not fire while typing in the note or choosing a tag; export; clear the browser's site data for the page; load the file and confirm every label returns; load the same file a second time (it works again, the page resets the file input).
 
+#### Rating in Telegram
+
+After each run the bot posts about 8 articles to Telegram: the digest picks plus `TELEGRAM_EXTRA` (3) non-picks that fill the gaps in the golden set (a dropped article within 1 of `RANK_MIN_SCORE`, a low-scored drop, one from the random sample the ranker never saw; marked `🔍 not in today's digest`). Articles already in the golden set are not asked again. One tap on `⭐ Must-read` / `👍 Worth it` / `👎 Skip` labels the article: the message shows `✅ <label>` (tap again to change it), the tap is appended to `evals/telegram_labels.jsonl` and merged into `evals/ranking_golden.json` with `import_labels.merge` (`labeled_with: "snapshot"`). Reply to an article message to store a note; `/progress` answers `N / 80 · must a · worth b · skip c`. About once a week (`TELEGRAM_RECHECK_EVERY_DAYS`) one labeled article is re-sent as `🔁 re-check`; its answer goes to `evals/telegram_recheck.jsonl` and never changes the golden row. Only the chat in `TELEGRAM_CHAT_ID` is served.
+
+Setup, once:
+
+```bash
+# 1. In Telegram, message @BotFather: /newbot, then put the token in .env as TELEGRAM_BOT_TOKEN=<token>
+python -m evals.telegram_rater setup     # 2. press Start in the bot chat; the bot replies with your chat id
+# 3. put TELEGRAM_CHAT_ID=<id> in .env, then install the poller as a user service:
+mkdir -p ~/.config/systemd/user && cp deploy/telegram-rater.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now telegram-rater
+sudo loginctl enable-linger $USER        # keep it running without a login session
+journalctl --user -u telegram-rater -f   # logs
+```
+
+`main.py` posts the articles at the end of every run (skipped with one line when no token or chat id is set; a bot failure never fails the digest). `python -m evals.telegram_rater send` posts today's reports by hand; a run already sent is not sent again. The state (`evals/telegram_state.json`, sent message ids and the update offset) and both `.jsonl` files are your data: keep them out of git.
+
 #### Ranking eval
 
 Once labels are in `evals/ranking_golden.json`, measure the ranker against them, in this order:
@@ -318,9 +336,13 @@ python main.py
 │   ├── rank_metrics.py   # precision@k and capped recall@k
 │   ├── rank_eval.py      # Replays the labeled articles through the ranker (python -m evals.rank_eval [--run])
 │   ├── rank_compare.py   # Baseline vs candidate rank_eval result
-│   └── label_audit.py    # Label counts, warnings and relabel agreement
-├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden, test_canonicalize_labels, test_label_hub, test_reader_arxiv, test_rank_split, test_rank_metrics, test_rank_eval, test_rank_compare, test_label_audit (each via `python -m tests.<name>`)
+│   ├── label_audit.py    # Label counts, warnings and relabel agreement
+│   ├── telegram_api.py   # Minimal Telegram Bot API client
+│   ├── telegram_select.py # What the rating bot sends each day, and the article message format
+│   └── telegram_rater.py # Telegram rating bot: send / poll / setup (python -m evals.telegram_rater)
+├── tests/                # Offline unit tests — python -m tests.test_link_utils, test_collectors, test_article_text, test_card_resolver, test_summarize_ids, test_shortlist_ids, test_text_levers, test_trace_judge, test_judge_llm, test_pipeline_evidence, test_tracing, test_eval_golden, test_canonicalize_labels, test_label_hub, test_reader_arxiv, test_rank_split, test_rank_metrics, test_rank_eval, test_rank_compare, test_label_audit, test_telegram_rater (each via `python -m tests.<name>`)
 ├── data/                 # Runtime data: chroma_db/ (git-ignored)
+├── deploy/               # telegram-rater.service (systemd --user unit for the rating bot poller)
 ├── output/               # Logs, trace reports, eval reports (git-ignored)
 ├── docs/                 # Screenshots
 └── requirements.txt

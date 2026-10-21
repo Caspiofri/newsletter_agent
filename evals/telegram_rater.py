@@ -1,26 +1,42 @@
 """Telegram rating bot: one tap on an article message labels it, and the label lands in evals/ranking_golden.json.
 
+Usage (from the repo root; TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env):
+  python -m evals.telegram_rater setup   # once: press Start in the bot chat, the bot replies with your chat id
+  python -m evals.telegram_rater send    # post today's articles (main.py does this after every run)
+  python -m evals.telegram_rater poll    # long-running: reads the taps (deploy/telegram-rater.service)
+
 State (evals/telegram_state.json) maps each sent message_id to the full report row, so a tap carries the same
 fields the labeling hub exports. Every tap is appended to evals/telegram_labels.jsonl (the raw log, never rewritten)
 and merged into the golden set through evals.import_labels.merge. Re-check taps go to evals/telegram_recheck.jsonl
 and never touch the golden set.
 """
+import argparse
+import fcntl
 import json
 import os
+import re
+import sys
 import tempfile
-from datetime import datetime
+import time
+import traceback
+from contextlib import contextmanager
+from datetime import date, datetime
 from pathlib import Path
 
-from config.settings import EVALS_DIR
+from config import settings  # also loads .env
+from config.settings import EVALS_DIR, OUTPUT_DIR
+from evals import telegram_select
 from evals.import_labels import GOLDEN_RANKING_PATH, VALID_LABELS, merge
 from evals.label_hub import DEFAULT_TARGET
-from evals.telegram_api import TelegramError
-from evals.telegram_select import BUTTONS, rated_markup_text, rating_markup
+from evals.telegram_api import TelegramError, make_api
+from evals.telegram_select import BUTTONS, format_message, rated_markup_text, rating_markup
 
 STATE_PATH = EVALS_DIR / "telegram_state.json"
 LOG_PATH = EVALS_DIR / "telegram_labels.jsonl"
 RECHECK_PATH = EVALS_DIR / "telegram_recheck.jsonl"
 PATHS = {"golden": GOLDEN_RANKING_PATH, "log": LOG_PATH, "recheck": RECHECK_PATH}
+_REPORT_RE = re.compile(r"^ranking_(.+)_(\d{8})_(\d{6})\.json$")
+POLL_TIMEOUT = 50  # seconds getUpdates waits for an update; the client timeout (60) must stay above it
 HELP = "Tap a button under an article to label it; reply to an article to add a note; /progress for the counts."
 
 
@@ -35,6 +51,18 @@ def _write_atomic(path: Path, data) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+@contextmanager
+def _locked(state_path: Path):
+    # send (cron) and poll (service) both rewrite the state file; a lock file keeps one from undoing the other
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(state_path.with_name(state_path.name + ".lock"), "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def load_state(path: Path) -> dict:
@@ -143,3 +171,137 @@ def handle_update(update: dict, api, chat_id: str | None, state: dict, paths: di
         _on_callback(q, api, state, paths, today)
     elif m:
         _on_message(m, api, chat, state, paths, today)
+
+
+# ---- send, poll, CLI
+
+def todays_reports(out_dir: Path, today: str) -> list[Path]:
+    """The latest ranking report of each profile written today (exported label files are not reports)."""
+    day = today.replace("-", "")
+    latest: dict[str, tuple[str, Path]] = {}
+    for p in out_dir.glob(f"ranking_*_{day}_*.json"):
+        m = _REPORT_RE.match(p.name)
+        if not m or m.group(2) != day or m.group(1).startswith("labels_"):
+            continue
+        if m.group(1) not in latest or m.group(3) > latest[m.group(1)][0]:
+            latest[m.group(1)] = (m.group(3), p)
+    return [p for _, p in latest.values()]
+
+
+def _send_one(api, chat_id: str, state: dict, row: dict, source_run: str, recheck: bool) -> bool:
+    text, markup = format_message(row, recheck=recheck)
+    try:
+        msg = api("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+                                  "disable_web_page_preview": True, "reply_markup": markup})
+    except TelegramError as e:
+        print(f"[telegram] could not send {row.get('url')}: {e}")
+        return False
+    state["sent"][str(msg["message_id"])] = {"row": row, "source_run": source_run, "recheck": recheck,
+                                             "text": text, "label": None, "note": ""}
+    return True
+
+
+def _recheck_row(g: dict) -> dict:
+    # a golden row back in report-row shape, without its label, so the message cannot anchor the answer
+    return {"url": g["url"], "title": g.get("title", ""), "origin": g.get("origin", ""), "group": g.get("group", ""),
+            "read_status": g.get("read_status", ""), "content": g.get("content", ""),
+            "picked": g.get("ranker_picked"), "score": g.get("ranker_score")}
+
+
+def send(report_paths: list[Path], api, chat_id: str, state_path: Path, golden_path: Path, today: str) -> int:
+    """Post each report's selection (and at most one re-check) as rating messages. Returns the number sent."""
+    golden = _load_golden(golden_path)
+    skip = {g["url"] for g in golden if g.get("url")}
+    n = 0
+    with _locked(state_path):
+        state = load_state(state_path)
+        for path in report_paths:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            items = data if isinstance(data, list) else data.get("items", [])
+            m = _REPORT_RE.match(path.name)
+            run = (data.get("run_id") if isinstance(data, dict) else None) or (f"{m.group(2)}_{m.group(3)}" if m else "")
+            already = {e["row"]["url"] for e in state["sent"].values() if e["source_run"] == run}
+            for row in telegram_select.select(items, skip | already, settings.RANK_MIN_SCORE, settings.TELEGRAM_EXTRA):
+                skip.add(row["url"])  # the same article in two profiles' reports is asked once
+                if _send_one(api, chat_id, state, row, run, recheck=False):
+                    n += 1
+                    save_state(state_path, state)
+        g = telegram_select.pick_recheck(golden, state.get("last_recheck"), today,
+                                         settings.TELEGRAM_RECHECK_EVERY_DAYS) if report_paths else None
+        if g and _send_one(api, chat_id, state, _recheck_row(g), g.get("source_run", ""), recheck=True):
+            n += 1
+            state["last_recheck"] = today
+            save_state(state_path, state)
+    return n
+
+
+def send_today(today: str | None = None) -> int:
+    """send() for today's reports with the token and chat id from the environment; no token: one line, nothing sent."""
+    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        print("[telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; nothing sent for rating")
+        return 0
+    today = today or str(date.today())
+    reports = todays_reports(OUTPUT_DIR, today)
+    n = send(reports, make_api(token), chat_id, STATE_PATH, GOLDEN_RANKING_PATH, today)
+    print(f"[telegram] {n} article(s) sent for rating from {len(reports)} report(s)")
+    return n
+
+
+def poll(api, chat_id: str | None, state_path: Path, paths: dict, once: bool = False, sleep=time.sleep) -> None:
+    """Long-poll getUpdates and handle each update; never exits on an API error (once=True: one successful batch)."""
+    failures = 0
+    while True:
+        try:
+            updates = api("getUpdates", {"offset": load_state(state_path)["offset"], "timeout": POLL_TIMEOUT,
+                                         "allowed_updates": ["message", "callback_query"]})
+        except TelegramError as e:
+            failures += 1
+            print(f"[telegram] {e}")
+            sleep(30 if failures >= 5 else 5)
+            continue
+        failures = 0
+        with _locked(state_path):
+            state = load_state(state_path)
+            for update in updates:
+                try:
+                    handle_update(update, api, chat_id, state, paths, str(date.today()))
+                except Exception:
+                    # one bad update must not block the queue: it is logged and skipped
+                    print(f"[telegram] update {update.get('update_id')} failed:\n{traceback.format_exc()}")
+                state["offset"] = update["update_id"] + 1
+                save_state(state_path, state)
+        if once:
+            return
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="python -m evals.telegram_rater", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("command", choices=["send", "poll", "setup"])
+    cmd = ap.parse_args(argv).command
+    if cmd == "send":
+        send_today()
+        return 0
+    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID") or None
+    if not token:
+        print("TELEGRAM_BOT_TOKEN is not set: create a bot with @BotFather and put the token in .env")
+        return 1
+    api = make_api(token)
+    if cmd == "setup":
+        print("Press Start (or send /start) in the bot chat in Telegram; the bot replies with your chat id.")
+        offset = load_state(STATE_PATH)["offset"]
+        for _ in range(6):  # about five minutes of long polls
+            poll(api, None, STATE_PATH, PATHS, once=True)
+            if load_state(STATE_PATH)["offset"] != offset:
+                return 0
+        print("No message reached the bot; run setup again.")
+        return 1
+    if chat_id is None:
+        print("[telegram] TELEGRAM_CHAT_ID is not set: only /start is answered (run setup)")
+    poll(api, chat_id, STATE_PATH, PATHS)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
