@@ -39,6 +39,54 @@ def test_hackernews_parse_hits():
     assert arts[1].url == "https://news.ycombinator.com/item?id=2" and "hello" in arts[1].content
 
 
+AUTHOR_FEED = """<?xml version="1.0"?><rss xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel>
+<item><title>Fresh post</title><link>https://a.medium.com/fresh-abc123?source=rss-1</link>
+<content:encoded><![CDATA[<h3>Intro</h3><p>""" + "word " * 400 + """</p>]]></content:encoded></item>
+<item><title>Member only</title><link>https://a.medium.com/paid-zzz?source=rss-1</link></item>
+</channel></rss>"""
+
+
+def test_medium_feed_url_for_article():
+    assert medium.feed_url_for("https://medium.com/@ann/fresh-abc123") == "https://medium.com/feed/@ann"
+    assert medium.feed_url_for("https://medium.com/illumination/post-1") == "https://medium.com/feed/illumination"
+    assert medium.feed_url_for("https://pub.towardsai.net/post-1") == "https://pub.towardsai.net/feed"
+
+
+def test_medium_parse_full_texts():
+    texts = medium.parse_full_texts(AUTHOR_FEED)
+    assert set(texts) == {"https://a.medium.com/fresh-abc123"}  # an item without content:encoded is left out
+    assert texts["https://a.medium.com/fresh-abc123"].startswith("Intro")
+
+
+def test_medium_with_full_text_upgrades_teasers():
+    arts = medium.parse_feed(FEED, "AI", max_age_days=2, today=TODAY)
+    paid = arts[0].model_copy(update={"name": "Member only", "url": "https://a.medium.com/paid-zzz"})
+    out = medium.with_full_text(arts + [paid], fetch=lambda url: AUTHOR_FEED)
+    assert out[0].read_status == "full" and out[0].content.startswith("Intro")
+    assert len(out[0].content) <= medium.FULL_TEXT_MAX_CHARS
+    assert out[1].read_status == "snippet" and out[1].content == "Teaser text"  # paywalled: teaser and link kept
+
+
+def test_medium_with_full_text_survives_failing_feed():
+    import requests
+    arts = medium.parse_feed(FEED, "AI", max_age_days=2, today=TODAY)
+
+    def boom(url):
+        raise requests.ConnectionError("boom")
+    assert medium.with_full_text(arts, fetch=boom) == arts
+
+
+def test_reader_keeps_full_text_from_feed():
+    from modules import reader
+    fed = _art("A", "https://a.medium.com/x", "medium").model_copy(
+        update={"content": "f" * 3000, "read_status": "full"})
+    called = []
+    r = reader.read_article(fed, 6000, fetch=lambda u: called.append(u))
+    assert r == fed and called == []  # no page fetch (Medium answers 403 anyway)
+    part = fed.model_copy(update={"content": "p" * 800, "read_status": "partial"})
+    assert reader.read_article(part, 6000, fetch=lambda u: None).read_status == "partial"
+
+
 def test_failing_source_is_skipped_not_fatal():
     import requests
     with patch("modules.collectors.medium._fetch_tag", side_effect=requests.ConnectionError("boom")):

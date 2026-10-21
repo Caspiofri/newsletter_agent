@@ -56,10 +56,14 @@ def fetch_text(url: str, timeout: int = 10) -> str | None:
 
 
 def read_article(article: Article, max_chars: int, fetch=fetch_text) -> Article:
-    """read_status: "full" (>= FULL_TEXT_MIN_CHARS fetched), "partial" (less), "snippet" (fetch failed, teaser kept)."""
+    """read_status: "full" (>= FULL_TEXT_MIN_CHARS fetched), "partial" (less), "snippet" (fetch failed, teaser kept).
+    A collector may already have supplied the text (Medium author feeds): a full one is not fetched again, and a
+    failed fetch keeps the status the collector gave."""
+    if article.read_status == "full":
+        return article
     text = fetch(article.url)
     if not text or len(text) <= len(article.content):
-        return article.model_copy(update={"read_status": "snippet"})
+        return article
     status = "full" if len(text) >= FULL_TEXT_MIN_CHARS else "partial"
     return article.model_copy(update={"content": text[:max_chars], "read_status": status})
 
