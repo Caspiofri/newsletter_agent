@@ -35,6 +35,10 @@ def judge_llm(prompt: str, model: str = JUDGE_MODEL_DAILY, max_tokens: int = 102
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
+    usage = getattr(response, "usage", None)
+    if rt is not None and usage is not None:
+        rt.set(usage_metadata={"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens,
+                               "total_tokens": usage.input_tokens + usage.output_tokens})
     return "".join(b.text for b in response.content if b.type == "text")
 
 

@@ -10,7 +10,7 @@ from email.utils import parsedate_to_datetime
 from googleapiclient.errors import HttpError
 import google.auth
 from google import genai
-from langsmith import traceable
+from langsmith import run_helpers, traceable
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from modules.state import DigestState
@@ -28,6 +28,18 @@ gmail = gmail_client.GmailClient()
 GEMINI_MODEL = "gemini-2.5-flash"  # recorded in evals.rank_eval results
 
 
+def _gemini_usage(response) -> dict | None:
+    """Gemini token counts in LangSmith's usage shape; thinking tokens are billed as output, so they count there."""
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return None
+    prompt = usage.prompt_token_count or 0
+    thoughts = usage.thoughts_token_count or 0
+    output = (usage.candidates_token_count or 0) + thoughts
+    return {"input_tokens": prompt, "output_tokens": output, "total_tokens": usage.total_token_count or prompt + output,
+            "output_token_details": {"reasoning": thoughts}}
+
+
 @traceable(run_type="llm", name="gemini")
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _call_gemini(contents: str, config: dict | None = None) -> str:
@@ -36,6 +48,12 @@ def _call_gemini(contents: str, config: dict | None = None) -> str:
         contents=contents,
         config=config or {},
     )
+    rt = run_helpers.get_current_run_tree()  # None when LANGSMITH_TRACING is off
+    usage = _gemini_usage(response)
+    if rt is not None:
+        rt.add_metadata({"ls_provider": "google_genai", "ls_model_name": GEMINI_MODEL})
+        if usage:
+            rt.set(usage_metadata=usage)
     return response.text
 
 def fetch_articles(state: DigestState) -> dict:
