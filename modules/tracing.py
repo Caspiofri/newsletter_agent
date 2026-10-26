@@ -30,6 +30,7 @@ FEEDBACK_KEY_NAMES: dict[str, str] = {
     "after_dedupe": "count.articles_after_dedupe",
     "dedupe_dropped": "count.articles_dedupe_dropped",
     "dedupe_matches": "count.dedupe_matches",
+    "dedupe_url_matches": "count.dedupe_url_matches",
     "dedupe_near_misses": "count.dedupe_near_misses",
     "dedupe_batch_duplicates": "count.dedupe_batch_duplicates",
     "dedupe_max_similarity": "metric.dedupe_max_similarity",

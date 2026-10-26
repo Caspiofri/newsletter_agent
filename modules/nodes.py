@@ -367,12 +367,15 @@ def dedupe_articles(state: DigestState) -> dict:
     unseen, matches = article_store.filter_seen_detailed(state["articles"], profile)
     dropped = len(state["articles"]) - len(unseen)
     if dropped:
-        print(f"[dedupe] Dropped {dropped} article(s) seen in the last {article_store.DEDUPE_DAYS} days.")
+        print(f"[dedupe] Dropped {dropped} article(s) already sent (same URL, or a similar story in the last "
+              f"{article_store.DEDUPE_DAYS} days).")
     hits = [m for m in matches if m["dropped"]]
+    by_url = [m for m in hits if m.get("matched_by") == "url"]
     stats = {**state.get("run_stats", {}), "after_dedupe": len(unseen), "dedupe_dropped": dropped,
-             "dedupe_matches": len(hits), "dedupe_near_misses": len(matches) - len(hits),
+             "dedupe_matches": len(hits), "dedupe_url_matches": len(by_url),
+             "dedupe_near_misses": len(matches) - len(hits),
              "dedupe_batch_duplicates": max(0, dropped - len(hits)),
-             "dedupe_max_similarity": round(max((m["similarity"] for m in hits), default=0.0), 3)}
+             "dedupe_max_similarity": round(max((m["similarity"] for m in hits if m not in by_url), default=0.0), 3)}
     return {"articles": unseen, "dedupe_drops": matches, "run_stats": stats}
 
 

@@ -14,7 +14,7 @@ _embed_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
 _client = PersistentClient(path=str(CHROMA_PATH))
 
 SIMILARITY_THRESHOLD = 0.82  # cosine similarity; distance = 1 - similarity
-DEDUPE_DAYS = 3
+DEDUPE_DAYS = 7  # embedding window; an already-sent URL is dropped for all of RETENTION_DAYS
 RETENTION_DAYS = 14
 
 
@@ -39,7 +39,7 @@ def store_articles(articles: list[Article], profile: str) -> None:
     col.upsert(
         ids=[hashlib.md5(f"{today_int}_{a.name}".encode()).hexdigest() for a in articles],
         documents=[_article_text(a) for a in articles],
-        metadatas=[{"date": today_int, "name": a.name} for a in articles],
+        metadatas=[{"date": today_int, "name": a.name, "url": a.url or ""} for a in articles],
     )
 
 
@@ -120,11 +120,39 @@ def _dedupe_trace_outputs(result) -> dict:
     } for m in matches]}
 
 
+def _drop_sent_urls(col, articles: list[Article]) -> tuple[list[Article], list[dict]]:
+    """Survivors plus one match per article whose exact URL was already sent, at any age still in the store.
+
+    Records stored before the URL was kept have none, so they only match by embedding.
+    """
+    urls = sorted({a.url for a in articles if a.url})
+    if not urls:
+        return articles, []
+    try:
+        sent = col.get(where={"url": {"$in": urls}}, include=["metadatas"])["metadatas"]
+    except Exception:
+        return articles, []
+    latest = {}
+    for meta in sent:
+        if meta and (meta.get("date") or 0) >= (latest.get(meta.get("url"), {}).get("date") or 0):
+            latest[meta.get("url")] = meta
+    unseen, matches = [], []
+    for article in articles:
+        meta = latest.get(article.url) if article.url else None
+        if meta is None:
+            unseen.append(article)
+            continue
+        matches.append({"title": article.name, "url": article.url, "similarity": 1.0,
+                        "matched_title": meta.get("name", ""), "matched_sent_on": _sent_on(meta.get("date")),
+                        "dropped": True, "matched_by": "url"})
+    return unseen, matches
+
+
 @traceable(run_type="retriever", name="dedupe_lookup",
            process_inputs=_dedupe_trace_inputs, process_outputs=_dedupe_trace_outputs)
 def filter_seen_detailed(articles: list[Article], profile: str,
                          days: int = DEDUPE_DAYS) -> tuple[list[Article], list[dict]]:
-    """Survivors plus one record per article whose nearest sent article is a near-miss or a duplicate."""
+    """Survivors plus one record per article already sent: by exact URL, or a near-miss or duplicate by embedding."""
     if not articles:
         return articles, []
 
@@ -135,6 +163,10 @@ def filter_seen_detailed(articles: list[Article], profile: str,
     col = _collection(profile)
     if col.count() == 0:
         return articles, []
+
+    articles, matches = _drop_sent_urls(col, articles)
+    if not articles:
+        return articles, matches
 
     cutoff = int((date.today() - timedelta(days=days)).strftime("%Y%m%d"))
     distance_threshold = 1.0 - SIMILARITY_THRESHOLD
@@ -147,9 +179,9 @@ def filter_seen_detailed(articles: list[Article], profile: str,
             include=["distances", "metadatas"],
         )
     except Exception:
-        return articles, []
+        return articles, matches
 
-    unseen, matches = [], []
+    unseen = []
     for article, distances, metadatas in zip(articles, results["distances"], results["metadatas"]):
         min_dist = min(distances) if distances else 1.0
         if min_dist >= distance_threshold:
@@ -165,6 +197,7 @@ def filter_seen_detailed(articles: list[Article], profile: str,
                     "matched_title": meta.get("name", ""),
                     "matched_sent_on": _sent_on(meta.get("date")),
                     "dropped": min_dist < distance_threshold,
+                    "matched_by": "embedding",
                 })
 
     return unseen, matches

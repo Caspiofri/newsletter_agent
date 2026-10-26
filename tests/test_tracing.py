@@ -106,7 +106,7 @@ def test_every_run_stats_key_is_mapped():
     written = [
         "merged",                                                         # merge_node
         "after_dedupe", "dedupe_dropped", "dedupe_matches",               # dedupe_node
-        "dedupe_near_misses", "dedupe_batch_duplicates", "dedupe_max_similarity",
+        "dedupe_url_matches", "dedupe_near_misses", "dedupe_batch_duplicates", "dedupe_max_similarity",
         "shortlisted",                                                    # shortlist node
         "read_full", "read_partial", "read_snippet",                      # read node (f"read_{s}")
         "ranked", "picked",                                               # rank node

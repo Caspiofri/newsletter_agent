@@ -14,14 +14,21 @@ def _art(name, origin="inbox", status="full"):
 
 
 class FakeCol:
-    """Stands in for a Chroma collection: one nearest neighbour per query text."""
-    def __init__(self, neighbours):
+    """Stands in for a Chroma collection: one nearest neighbour per query text, and sent records by URL."""
+    def __init__(self, neighbours, sent=()):
         self.neighbours = neighbours  # article name -> (distance, matched name, matched date int) or None
+        self.sent = list(sent)  # stored metadatas, e.g. {"name": ..., "date": ..., "url": ...}
+        self.queried = []
 
     def count(self):
         return 3
 
+    def get(self, where, include):
+        urls = where["url"]["$in"]
+        return {"metadatas": [m for m in self.sent if m.get("url") in urls]}
+
     def query(self, query_texts, n_results, where, include):
+        self.queried.extend(query_texts)
         d, m = [], []
         for text in query_texts:
             hit = next((v for k, v in self.neighbours.items() if text.startswith(k + ".")), None)
@@ -49,8 +56,48 @@ def test_filter_seen_detailed_reports_drop_and_near_miss():
     assert [a.name for a in kept] == ["Near", "Far", "New"]
     assert [d["title"] for d in drops] == ["Dup", "Near"], drops
     assert drops[0] == {"title": "Dup", "url": "https://x.example/Dup", "similarity": 0.9,
-                        "matched_title": "Old dup title", "matched_sent_on": "2026-10-16", "dropped": True}
+                        "matched_title": "Old dup title", "matched_sent_on": "2026-10-16", "dropped": True,
+                        "matched_by": "embedding"}
     assert drops[1]["similarity"] == 0.75 and drops[1]["dropped"] is False
+
+
+def test_filter_seen_drops_an_already_sent_url_whatever_its_age():
+    # DeepInfer, 2026-10-26: the same GitHub URL sent 4 days earlier under another title, outside the embedding window
+    sent = [{"name": "DeepInfer (GitHub Repo)", "date": 20261019, "url": "https://x.example/Repo"},
+            {"name": "DeepInfer (GitHub Repo)", "date": 20261022, "url": "https://x.example/Repo"}]
+    col = FakeCol({}, sent)
+    arts = [_art("Repo"), _art("New")]
+    with patch.object(article_store, "_collection", return_value=col), \
+            patch.object(article_store, "_dedup_batch", side_effect=lambda a: a):
+        kept, drops = article_store.filter_seen_detailed(arts, "p")
+    assert [a.name for a in kept] == ["New"]
+    assert drops == [{"title": "Repo", "url": "https://x.example/Repo", "similarity": 1.0,
+                      "matched_title": "DeepInfer (GitHub Repo)", "matched_sent_on": "2026-10-22", "dropped": True,
+                      "matched_by": "url"}]
+    assert [t.split(".")[0] for t in col.queried] == ["New"]  # a URL match skips the embedding lookup
+
+
+def test_filter_seen_url_check_skips_articles_without_url():
+    col = FakeCol({}, [{"name": "x", "date": 20261022, "url": None}])
+    art = _art("A").model_copy(update={"url": None})
+    with patch.object(article_store, "_collection", return_value=col), \
+            patch.object(article_store, "_dedup_batch", side_effect=lambda a: a):
+        kept, drops = article_store.filter_seen_detailed([art], "p")
+    assert kept == [art] and drops == []
+
+
+def test_store_articles_keeps_the_url():
+    class Col:
+        def upsert(self, ids, documents, metadatas):
+            self.metadatas = metadatas
+    col = Col()
+    with patch.object(article_store, "_collection", return_value=col):
+        article_store.store_articles([_art("A"), _art("B").model_copy(update={"url": None})], "p")
+    assert [m["url"] for m in col.metadatas] == ["https://x.example/A", ""]
+
+
+def test_dedupe_window_is_a_week():
+    assert article_store.DEDUPE_DAYS == 7 < article_store.RETENTION_DAYS
 
 
 def test_filter_seen_still_returns_survivors():
@@ -69,19 +116,30 @@ def test_dedupe_node_records_drops_and_stats():
         out = nodes.dedupe_articles(state)
     assert out["articles"] == arts[1:] and out["dedupe_drops"] == drops
     assert out["run_stats"] == {"merged": 3, "after_dedupe": 2, "dedupe_dropped": 1, "dedupe_matches": 1,
-                                "dedupe_near_misses": 1, "dedupe_batch_duplicates": 0,
+                                "dedupe_url_matches": 0, "dedupe_near_misses": 1, "dedupe_batch_duplicates": 0,
                                 "dedupe_max_similarity": 0.9}
     # partial state without run_stats must not break
     with patch.object(article_store, "filter_seen_detailed", return_value=(arts, [])):
         out = nodes.dedupe_articles({"digest_name": "d", "articles": arts})
     assert out["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0, "dedupe_matches": 0,
-                                "dedupe_near_misses": 0, "dedupe_batch_duplicates": 0,
+                                "dedupe_url_matches": 0, "dedupe_near_misses": 0, "dedupe_batch_duplicates": 0,
                                 "dedupe_max_similarity": 0.0}
 
 
-def _match(title, similarity, dropped):
+def _match(title, similarity, dropped, matched_by="embedding"):
     return {"title": title, "url": "u", "similarity": similarity, "matched_title": f"old {title}",
-            "matched_sent_on": "2026-10-17", "dropped": dropped}
+            "matched_sent_on": "2026-10-17", "dropped": dropped, "matched_by": matched_by}
+
+
+def test_dedupe_node_counts_url_matches_apart_from_similarity():
+    arts = [_art(f"A{i}") for i in range(3)]
+    matches = [_match("A0", 1.0, True, "url"), _match("A1", 0.88, True)]
+    with patch.object(article_store, "filter_seen_detailed", return_value=(arts[2:], matches)):
+        out = nodes.dedupe_articles({"digest_name": "d", "articles": arts})
+    stats = out["run_stats"]
+    assert stats["dedupe_matches"] == 2 and stats["dedupe_url_matches"] == 1
+    assert stats["dedupe_batch_duplicates"] == 0
+    assert stats["dedupe_max_similarity"] == 0.88  # a URL match is not a similarity measurement
 
 
 def test_dedupe_node_records_match_near_miss_batch_and_max():
@@ -172,7 +230,7 @@ def test_run_stats_accumulate_across_nodes():
         state.update(nodes.read_articles(state))
     resp = json.dumps([{"id": i, "score": 7 - i, "reason": "r"} for i in range(3)])
     state.update(_rank(state["candidates"], resp, state["run_stats"]))
-    assert state["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0, "dedupe_matches": 0,
+    assert state["run_stats"] == {"after_dedupe": 3, "dedupe_dropped": 0, "dedupe_matches": 0, "dedupe_url_matches": 0,
                                   "dedupe_near_misses": 0, "dedupe_batch_duplicates": 0,
                                   "dedupe_max_similarity": 0.0, "shortlisted": 3,
                                   "read_full": 3, "read_partial": 0, "read_snippet": 0,
