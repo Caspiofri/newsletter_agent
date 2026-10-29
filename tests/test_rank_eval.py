@@ -155,6 +155,34 @@ def test_replay_report_without_must_reads_is_n_a_and_skipped_in_overall():
     assert "n/a" in rank_eval.format_result(out)
 
 
+def test_replay_keeps_every_score_and_pools_pairwise():
+    rows = ROWS[:3] + [{**_row("t", "must"), "read_status": "snippet"}]
+    out = rank_eval.replay(rows, k=1, repeats=2, text_chars=100, score_fn=_score_fn({**SCORES, "t": 6}))
+    rep = out["reports"][0]["repeats"][0]
+    assert rep["scores"] == {f"https://x.example/r1/{t}": s for t, s in (("a", 9), ("b", 8), ("c", 1), ("t", 6))}
+    pooled = out["overall"]["pooled"]
+    # a(must)9 b(skip)8 c(worth)1 t(must, teaser)6: pairs a>b ok, a>c ok, c<b wrong, t<b wrong, t>c ok -> 3/5
+    assert pooled["mean"]["pairwise"] == 0.6 and pooled["spread"]["pairwise"] == 0.0
+    assert pooled["mean"]["pairwise_read"] == 2 / 3  # t left out
+    assert pooled["mean"]["mean_must"] == 9 and pooled["mean"]["teaser_mean_must"] == 6
+    assert pooled["pairs"] == 5 and pooled["pairs_read"] == 3
+    text = rank_eval.format_result(out)
+    assert "pairwise" in text and "0.60" in text and "must 9.0" in text
+
+
+def test_replay_pooled_skips_failed_repeats():
+    n = [0]
+
+    def flaky(candidates, **kw):
+        n[0] += 1
+        if n[0] == 1:
+            raise ValueError("bad reply")
+        return {i: SCORES[c.name] for i, c in enumerate(candidates)}
+
+    out = rank_eval.replay(ROWS[:3], k=1, repeats=2, text_chars=100, score_fn=flaky)
+    assert out["overall"]["pooled"]["mean"]["pairwise"] == 2 / 3  # a>b ok, a>c ok, c<b wrong
+
+
 def test_by_origin_precision():
     rows = [_row("a", "must", origin="inbox"), _row("b", "skip", origin="medium"),
             _row("c", "worth", origin="hackernews"), _row("d", "skip", origin="inbox")]

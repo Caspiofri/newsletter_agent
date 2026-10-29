@@ -3,6 +3,7 @@ No network and no real token: the Bot API is a callable passed in and faked."""
 import json
 import os
 import random
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -168,7 +169,7 @@ class FakeApi:
 
 def _paths(d):
     d = Path(d)
-    return {"golden": d / "golden.json", "log": d / "labels.jsonl", "recheck": d / "recheck.jsonl"}
+    return {"golden": d / "golden.json", "log": d / "labels.jsonl", "recheck": d / "recheck.jsonl", "out_dir": d}
 
 
 def _state_with(message_id=100, row=None, recheck=False, label=None, note=""):
@@ -206,9 +207,10 @@ def test_tap_labels_and_merges_golden():
         assert api.methods() == ["answerCallbackQuery", "editMessageText"]
         assert api.calls[0][1]["text"] == "Saved: ⭐ Must-read"
         edit = api.calls[1][1]
-        assert edit["message_id"] == 100 and edit["text"].endswith("✅ ⭐ Must-read") and edit["parse_mode"] == "HTML"
-        assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == \
-            ["rate:must", "rate:worth", "rate:skip"]
+        # a rated message collapses to one line: label and linked title, with a Change button
+        assert edit["message_id"] == 100 and edit["text"].startswith("✅ ⭐ Must-read · ") and edit["parse_mode"] == "HTML"
+        assert '<a href="https://a">Article A</a>' in edit["text"] and "\n" not in edit["text"]
+        assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == ["edit"]
         assert state["sent"]["100"]["label"] == "must"
         log = _lines(paths["log"])
         assert len(log) == 1 and {k: log[0][k] for k in ("message_id", "url", "label", "note", "source_run")} == \
@@ -227,7 +229,28 @@ def test_second_tap_changes_label_one_row_two_log_lines():
         telegram_rater.handle_update(_tap("rate:skip", update_id=2), api, CHAT, state, paths, TODAY)
         assert [g["label"] for g in _golden(paths)] == ["skip"]
         assert [x["label"] for x in _lines(paths["log"])] == ["must", "skip"]
-        assert api.calls[-1][1]["text"].endswith("✅ 👎 Skip") and api.calls[-1][1]["text"].count("✅") == 1
+        assert api.calls[-1][1]["text"].startswith("✅ 👎 Skip · ") and api.calls[-1][1]["text"].count("✅") == 1
+
+
+def test_change_expands_the_rated_message():
+    with tempfile.TemporaryDirectory() as d:
+        paths, state, api = _paths(d), _state_with(), FakeApi()
+        telegram_rater.handle_update(_tap("rate:worth"), api, CHAT, state, paths, TODAY)
+        telegram_rater.handle_update(_tap("edit", update_id=2), api, CHAT, state, paths, TODAY)
+        assert api.methods()[-2:] == ["answerCallbackQuery", "editMessageText"]
+        edit = api.calls[-1][1]
+        # the full card is back, showing the current label, with the three rating buttons
+        assert edit["text"].startswith(state["sent"]["100"]["text"]) and edit["text"].endswith("✅ 👍 Worth it")
+        assert [b["callback_data"] for b in edit["reply_markup"]["inline_keyboard"][0]] == \
+            ["rate:must", "rate:worth", "rate:skip"]
+        assert len(_lines(paths["log"])) == 1 and [g["label"] for g in _golden(paths)] == ["worth"]  # nothing written
+
+
+def test_collapsed_title_is_escaped_and_shortened():
+    row = _item("https://a?x=1&y=2", title="a<b & " + "c" * 200)
+    text = telegram_select.collapsed_text(row, "skip")
+    assert text.startswith("✅ 👎 Skip · ") and "a&lt;b &amp; " in text and 'href="https://a?x=1&amp;y=2"' in text
+    assert len(text) < 200 and text.endswith("…</a>")
 
 
 def test_unknown_message_answered_nothing_written():
@@ -280,6 +303,50 @@ def test_recheck_tap_goes_to_recheck_file_not_golden():
         [r] = _lines(paths["recheck"])
         assert r["url"] == "https://a" and r["label"] == "skip"
         assert api.methods() == ["answerCallbackQuery", "editMessageText"]
+
+
+def _post_spy(calls, api=None, fail=None):
+    # stands in for human_feedback.post_picks_precision; records (golden, run, Telegram calls made so far)
+    def post(golden, source_run, client=None):
+        calls.append((golden, source_run, len(api.calls) if api else None))
+        if fail:
+            raise fail
+        return True
+    return post
+
+
+def test_pick_tap_posts_human_score_after_telegram():
+    with tempfile.TemporaryDirectory() as d:
+        paths, api, posted = _paths(d), FakeApi(), []
+        state = _state_with(row=_item("https://a", picked=True, score=8.0, group="picked", title="Article A"))
+        with patch.object(telegram_rater.human_feedback, "post_picks_precision", _post_spy(posted, api)):
+            telegram_rater.handle_update(_tap("rate:worth"), api, CHAT, state, paths, TODAY)
+        [(golden, run, telegram_calls)] = posted
+        assert run == "20261021_070000" and telegram_calls == 2  # answer and edit went out first
+        assert [(g["url"], g["label"], g["ranker_picked"]) for g in golden] == [("https://a", "worth", True)]
+        assert golden == _golden(paths)
+
+
+def test_non_pick_and_recheck_taps_do_not_post():
+    with tempfile.TemporaryDirectory() as d:
+        paths, posted = _paths(d), []
+        with patch.object(telegram_rater.human_feedback, "post_picks_precision", _post_spy(posted)):
+            telegram_rater.handle_update(_tap("rate:must"), FakeApi(), CHAT, _state_with(), paths, TODAY)
+            recheck = _state_with(row=_item("https://a", picked=True, score=8.0), recheck=True)
+            telegram_rater.handle_update(_tap("rate:must"), FakeApi(), CHAT, recheck, paths, TODAY)
+            telegram_rater.handle_update(_tap("edit", update_id=2), FakeApi(), CHAT, recheck, paths, TODAY)
+        assert posted == []
+
+
+def test_pick_tap_survives_feedback_error():
+    with tempfile.TemporaryDirectory() as d:
+        paths, api, posted = _paths(d), FakeApi(), []
+        state = _state_with(row=_item("https://a", picked=True, score=8.0))
+        with patch.object(telegram_rater.human_feedback, "post_picks_precision",
+                          _post_spy(posted, api, fail=RuntimeError("langsmith down"))):
+            telegram_rater.handle_update(_tap("rate:must"), api, CHAT, state, paths, TODAY)
+        assert len(posted) == 1 and api.methods() == ["answerCallbackQuery", "editMessageText"]
+        assert _golden(paths)[0]["label"] == "must"
 
 
 def test_progress_counts():
@@ -460,6 +527,182 @@ def test_cli_send_without_token_exits_zero():
     with patch.dict(os.environ, env, clear=True), \
             patch.object(telegram_rater, "make_api", side_effect=AssertionError("no API without a token")):
         assert telegram_rater.main(["send"]) == 0
+
+
+# ---- /more
+
+def _more_reports(d):
+    """Two days of reports (two profiles on the older day); the newer report repeats one URL of the older one."""
+    _report(d, "ai", "20261019_070000", [
+        _item("https://old-p0", picked=True, score=8), _item("https://old-near", score=4.6),
+        _item("https://old-low", score=0.5), _item("https://old-s", group="sample"),
+        _item("https://dup", picked=True, score=9, title="old dup")])
+    _report(d, "medical", "20261019_080000", [_item("https://med-p0", picked=True, score=9)])
+    _report(d, "ai", "20261020_070000", [
+        _item("https://new-p0", picked=True, score=8), _item("https://new-p1", picked=True, score=7),
+        _item("https://new-near", score=4.2), _item("https://new-low", score=2),
+        _item("https://new-s", group="sample"), _item("https://dup", score=4.1, title="new dup")])
+    (d / "ranking_labels_ai_20261021_080000.json").write_text(json.dumps({"run_id": "x", "items": [
+        _item("https://label-file", picked=True, score=9)]}), encoding="utf-8")
+
+
+def _more(d, text="/more", api=None, state=None):
+    paths = _paths(d)
+    state = state if state is not None else {"offset": 0, "last_recheck": None, "sent": {}}
+    api = api or FakeApi({"sendMessage": _sender(1000)})
+    telegram_rater.handle_update(_msg(text), api, CHAT, state, paths, TODAY)
+    return api, state
+
+
+def _sent_urls(api):
+    return [re.search(r'href="([^"]+)">Read article', p["text"]).group(1) for m, p in api.calls
+            if m == "sendMessage" and "Read article" in p["text"]]
+
+
+def test_more_default_five_rotates_slots_newest_first():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        api, state = _more(d)
+        assert api.calls[0] == ("sendMessage", {"chat_id": CHAT, "text":
+                                "Sending 5 more (picks 2 · near cutoff 1 · low score 1 · never ranked 1)"})
+        # round 1: one per slot, newest report first; round 2: the next pick
+        assert _sent_urls(api) == ["https://new-p0", "https://new-near", "https://new-low", "https://new-s",
+                                   "https://new-p1"]
+        first = api.calls[1][1]
+        assert first["parse_mode"] == "HTML" and first["reply_markup"] == telegram_select.rating_markup()
+
+
+def test_more_n_and_clamp():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        api, _ = _more(d, "/more 3")
+        assert _sent_urls(api) == ["https://new-p0", "https://new-near", "https://new-low"]
+        assert api.calls[0][1]["text"] == "Sending 3 more (picks 1 · near cutoff 1 · low score 1)"
+        assert len(_sent_urls(_more(d, "/more 0")[0])) == 1
+        assert len(_sent_urls(_more(d, "/more abc")[0])) == 5
+        # 50 clamps to 20; fewer than 20 exist, so all of them are sent: 11 unique URLs, the label file ignored
+        urls = _sent_urls(_more(d, "/more 50")[0])
+        assert len(urls) == 11 and "https://label-file" not in urls
+
+
+def test_more_full_rotation_order_across_reports():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        api, _ = _more(d, "/more 20")
+        # dup is in the newest report as a near-cutoff drop (4.1), so it is asked once, from there
+        assert _sent_urls(api) == [
+            "https://new-p0", "https://new-near", "https://new-low", "https://new-s",
+            "https://new-p1", "https://dup", "https://old-low", "https://old-s",
+            "https://med-p0", "https://old-near",
+            "https://old-p0"]
+        assert api.calls[0][1]["text"] == "Sending 11 more (picks 4 · near cutoff 3 · low score 2 · never ranked 2)"
+
+
+def test_more_excludes_labeled_and_already_sent():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        paths = _paths(d)
+        paths["golden"].write_text(json.dumps([{"url": "https://new-p0", "label": "must"},
+                                               {"url": "https://new-near", "label": "skip"}]), encoding="utf-8")
+        state = _state_with(row=_item("https://new-low", score=2))
+        state["sent"]["101"] = {**state["sent"]["100"], "row": _item("https://new-s", group="sample"),
+                                "source_run": "20261020_070000"}
+        api, _ = _more(d, "/more 4", state=state)
+        assert _sent_urls(api) == ["https://new-p1", "https://dup", "https://old-low", "https://old-s"]
+
+
+def test_more_dedupes_keeping_newest_row_and_source_run():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        api, state = _more(d, "/more 20")
+        entries = {e["row"]["url"]: e for e in state["sent"].values()}
+        assert len(entries) == len(state["sent"]) == 11
+        assert entries["https://dup"]["row"]["title"] == "new dup"
+        assert entries["https://dup"]["source_run"] == "20261020_070000"
+        assert entries["https://old-p0"]["source_run"] == "20261019_070000"
+        assert entries["https://med-p0"]["source_run"] == "20261019_080000"
+        e = entries["https://new-p0"]
+        assert e["recheck"] is False and e["label"] is None and e["note"] == ""
+        assert e["text"] == telegram_select.format_message(e["row"])[0]
+
+
+def test_more_nothing_left():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        _, state = _more(d, "/more 20")
+        api, _ = _more(d, "/more", state=state)
+        assert api.calls == [("sendMessage", {"chat_id": CHAT, "text":
+                                              "Nothing left to rate — new articles arrive with tomorrow's run."})]
+    with tempfile.TemporaryDirectory() as d:  # no reports at all
+        api, _ = _more(Path(d))
+        assert api.calls[0][1]["text"].startswith("Nothing left to rate")
+
+
+def test_more_failed_send_continues():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        ids = _sender(1000)
+
+        def send_message(params):
+            if "new-near" in params["text"]:
+                raise telegram_api.TelegramError("sendMessage: Bad Request")
+            return ids(params)
+
+        api, state = _more(d, "/more 3", api=FakeApi({"sendMessage": send_message}))
+        assert len(api.calls) == 4
+        assert [e["row"]["url"] for e in state["sent"].values()] == ["https://new-p0", "https://new-low"]
+
+
+def test_more_from_poll_persists_state():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        api = FakeApi({"getUpdates": [_msg("/more 2", update_id=5)], "sendMessage": _sender(1000)})
+        telegram_rater.poll(api, CHAT, d / "state.json", _paths(d), once=True, sleep=lambda s: None)
+        state = telegram_rater.load_state(d / "state.json")
+        assert [e["row"]["url"] for e in state["sent"].values()] == ["https://new-p0", "https://new-near"]
+        assert state["offset"] == 6
+
+
+def test_more_low_sends_lowest_scored_drops_across_reports():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        api, _ = _more(d, "/more low")
+        # all drops from every report, lowest score first; picks and never-ranked samples are left out
+        assert _sent_urls(api) == ["https://old-low", "https://new-low", "https://dup", "https://new-near",
+                                   "https://old-near"]
+        assert api.calls[0][1]["text"] == "Sending 5 more (low score 5)"
+
+
+def test_more_low_n_either_order_and_excludes_labeled():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _more_reports(d)
+        assert _sent_urls(_more(d, "/more low 2")[0]) == ["https://old-low", "https://new-low"]
+        assert _sent_urls(_more(d, "/more 2 low")[0]) == ["https://old-low", "https://new-low"]
+        assert _sent_urls(_more(d, "/more LOW 1")[0]) == ["https://old-low"]
+        _paths(d)["golden"].write_text(json.dumps([{"url": "https://old-low", "label": "skip"}]), encoding="utf-8")
+        _, state = _more(d, "/more low 1")
+        assert [e["row"]["url"] for e in state["sent"].values()] == ["https://new-low"]
+        api, state = _more(d, "/more low", api=FakeApi({"sendMessage": _sender(2000)}), state=state)
+        assert _sent_urls(api) == ["https://dup", "https://new-near", "https://old-near"]
+        api, _ = _more(d, "/more low", api=FakeApi({"sendMessage": _sender(3000)}), state=state)
+        assert api.calls == [("sendMessage", {"chat_id": CHAT, "text": telegram_rater.NOTHING_LEFT})]
+
+
+def test_help_mentions_more():
+    with tempfile.TemporaryDirectory() as d:
+        api = FakeApi()
+        telegram_rater.handle_update(_msg("hello"), api, CHAT, _state_with(), _paths(d), TODAY)
+        assert "/more" in api.calls[-1][1]["text"] and "/more low" in api.calls[-1][1]["text"]
 
 
 if __name__ == "__main__":

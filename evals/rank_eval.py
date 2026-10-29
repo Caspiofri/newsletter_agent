@@ -1,5 +1,6 @@
 """Ranker replay: re-score the labeled articles of each ranking report with the production ranker prompt, several
-times, and measure precision@k and capped recall@k against the labels (evals.rank_metrics).
+times, and measure precision@k and capped recall@k against the labels, plus pairwise accuracy and the mean score
+per label over every labeled article (evals.rank_metrics). Every article's score is kept in the result file.
 
 Usage (from the repo root):
   python -m evals.rank_eval [--split train|test|all] [--k 5] [--repeats 3] [--text-chars 6000]
@@ -25,6 +26,7 @@ from modules.models import Article
 
 PROMPT_OVERHEAD_CHARS = 1500  # the fixed part of the ranker prompt
 ITEM_OVERHEAD_CHARS = 200  # id, title, source description per candidate
+POOLED_KEYS = rank_metrics.POOLED + ("teaser_mean_must", "teaser_mean_worth", "teaser_mean_skip")
 
 
 def golden_to_candidates(rows: list[dict], subject: str = "") -> list[Article]:
@@ -52,10 +54,10 @@ def _group_by_report(rows: list[dict]) -> dict[str, list[dict]]:
     return dict(sorted(groups.items()))
 
 
-def _mean_and_spread(repeats: list[dict]) -> tuple[dict, dict]:
+def _mean_and_spread(repeats: list[dict], metrics=rank_metrics.METRICS) -> tuple[dict, dict]:
     """Mean and population standard deviation of each metric over the repeats where it is defined."""
     mean, spread = {}, {}
-    for m in rank_metrics.METRICS:
+    for m in metrics:
         values = [r[m] for r in repeats if "failed" not in r and r.get(m) is not None]
         mean[m] = statistics.fmean(values) if values else None
         spread[m] = statistics.pstdev(values) if values else None
@@ -74,12 +76,14 @@ def replay(rows: list[dict], k: int, repeats: int, text_chars: int, score_fn=Non
         from modules.nodes import score_candidates as score_fn  # imported late: it sets up Google clients
     reports, failed = [], 0
     by_origin: dict[str, list[int]] = {}  # origin -> [good labeled picks, labeled picks]
+    pooled_in: list[list[tuple]] = [[] for _ in range(repeats)]  # repeat -> (scores, labels, teasers) per report
     for run, group in _group_by_report(rows).items():
         candidates = golden_to_candidates(group, subject)
         labels = {r["url"]: r["label"] for r in group}
         origin = {r["url"]: r.get("origin") or "" for r in group}
+        teasers = {r["url"] for r in group if (r.get("read_status") or "snippet") == "snippet"}
         results = []
-        for _ in range(repeats):
+        for i_repeat in range(repeats):
             try:
                 scores = score_fn(candidates, subject=subject, target_audience=target_audience,
                                   experience_level=experience_level, top_k=k, text_chars=text_chars)
@@ -89,8 +93,10 @@ def replay(rows: list[dict], k: int, repeats: int, text_chars: int, score_fn=Non
                 failed += 1
                 results.append({"failed": f"{type(e).__name__}: {e}"[:300]})
                 continue
-            metrics = rank_metrics.evaluate_report({group[i]["url"]: s for i, s in scores.items()}, labels, k)
+            by_url = {group[i]["url"]: s for i, s in scores.items()}
+            metrics = {**rank_metrics.evaluate_report(by_url, labels, k), "scores": by_url}
             results.append(metrics)
+            pooled_in[i_repeat].append((by_url, labels, teasers))
             for p in metrics["picks"]:
                 tally = by_origin.setdefault(origin[p], [0, 0])
                 tally[0] += labels[p] in rank_metrics.GOOD_LABELS
@@ -106,7 +112,13 @@ def replay(rows: list[dict], k: int, repeats: int, text_chars: int, score_fn=Non
             per_repeat.append(rank_metrics.aggregate(ok))
     mean, spread = _mean_and_spread(per_repeat)
     defined = rank_metrics.aggregate([rep["mean"] for rep in reports])
+    pooled_repeats = [rank_metrics.pooled(p) for p in pooled_in if p]
+    p_mean, p_spread = _mean_and_spread(pooled_repeats, POOLED_KEYS)
+    pooled = {"mean": p_mean, "spread": p_spread,
+              "pairs": max((p["pairs"] for p in pooled_repeats), default=0),
+              "pairs_read": max((p["pairs_read"] for p in pooled_repeats), default=0)}
     overall = {"mean": mean, "spread": spread, "n_reports": len(reports), "n_defined": defined["n_defined"],
+               "pooled": pooled,
                "by_origin": {o: {"precision": good / n if n else None, "labeled_picks": n}
                              for o, (good, n) in sorted(by_origin.items())}}
     return {"settings": {"k": k, "repeats": repeats, "text_chars": text_chars}, "reports": reports,
@@ -130,6 +142,15 @@ def format_result(result: dict) -> str:
                  f"{o['n_defined']['recall']}/{o['n_reports']} (recall); spread = std. deviation over repeats")
     for origin, v in o["by_origin"].items():
         lines.append(f"  precision of picks from {origin}: {_fmt(v['precision'])} ({v['labeled_picks']} labeled picks)")
+    p = o.get("pooled")
+    if p:
+        m, s = p["mean"], p["spread"]
+        lines.append(f"pairwise (better label scored higher, 0.5 = random): {_fmt(m['pairwise'])} ± "
+                     f"{_fmt(s['pairwise'])} over {p['pairs']} pairs; without teaser-only articles "
+                     f"{_fmt(m['pairwise_read'])} ± {_fmt(s['pairwise_read'])} over {p['pairs_read']} pairs")
+        means = lambda prefix: " · ".join(f"{lab} {'n/a' if m[prefix + lab] is None else f'{m[prefix + lab]:.1f}'}"
+                                          for lab in ("must", "worth", "skip"))
+        lines.append(f"mean score: {means('mean_')}  (teaser-only, capped at the snippet cap: {means('teaser_mean_')})")
     return "\n".join(lines)
 
 

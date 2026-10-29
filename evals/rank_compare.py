@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-from evals.rank_metrics import METRICS
+from evals.rank_metrics import METRICS, POOLED
 
 MUST_MATCH = ("split", "k", "golden_rows")
 NOT_SETTINGS = ("date",)  # differs on every run, says nothing about the change
@@ -24,9 +24,13 @@ def compare(baseline: dict, candidate: dict) -> dict:
     changed = [f"{key}: {bs.get(key)} vs {cs.get(key)}" for key in sorted(set(bs) | set(cs))
                if key not in NOT_SETTINGS and bs.get(key) != cs.get(key)]
     metrics = {}
-    for m in METRICS:
-        b, c = baseline["overall"]["mean"].get(m), candidate["overall"]["mean"].get(m)
-        noise = max(baseline["overall"]["spread"].get(m) or 0.0, candidate["overall"]["spread"].get(m) or 0.0)
+    # pooled metrics sit under overall.pooled; results written before they existed show them as n/a
+    sides = [(r["overall"], r["overall"].get("pooled") or {"mean": {}, "spread": {}}) for r in (baseline, candidate)]
+    for m in METRICS + POOLED:
+        (bo, bp), (co, cp) = sides
+        b_part, c_part = (bo, co) if m in METRICS else (bp, cp)
+        b, c = b_part["mean"].get(m), c_part["mean"].get(m)
+        noise = max(b_part["spread"].get(m) or 0.0, c_part["spread"].get(m) or 0.0)
         diff = None if b is None or c is None else c - b
         verdict = "n/a" if diff is None else "clear" if abs(diff) > noise else "within noise"
         metrics[m] = {"baseline": b, "candidate": c, "diff": diff, "noise": noise, "verdict": verdict}
@@ -38,9 +42,9 @@ def _fmt(value, sign: bool = False) -> str:
 
 
 def format_comparison(out: dict) -> str:
-    lines = [f"{'metric':<10} {'baseline':>8} {'candidate':>9} {'diff':>6} {'noise':>6}  verdict"]
+    lines = [f"{'metric':<13} {'baseline':>8} {'candidate':>9} {'diff':>6} {'noise':>6}  verdict"]
     for m, v in out["metrics"].items():
-        lines.append(f"{m:<10} {_fmt(v['baseline']):>8} {_fmt(v['candidate']):>9} {_fmt(v['diff'], True):>6} "
+        lines.append(f"{m:<13} {_fmt(v['baseline']):>8} {_fmt(v['candidate']):>9} {_fmt(v['diff'], True):>6} "
                      f"{_fmt(v['noise']):>6}  {v['verdict']}")
     lines.append("changed settings: " + (", ".join(out["changed_settings"]) or "none"))
     lines.append("verdict: " + "; ".join(f"{m} {_fmt(v['diff'], True)} ({v['verdict']})"

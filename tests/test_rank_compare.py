@@ -23,6 +23,19 @@ def test_compare_reports_difference_and_noise_flag():
     assert p["baseline"] == 0.6 and p["candidate"] == 0.8 and p["noise"] == 0.1
 
 
+def test_compare_includes_pooled_metrics_when_both_have_them():
+    base, cand = _result(0.6, 0.5), _result(0.6, 0.5)
+    base["overall"]["pooled"] = {"mean": {"pairwise": 0.60, "mean_must": 6.0}, "spread": {"pairwise": 0.02, "mean_must": 0.1}}
+    cand["overall"]["pooled"] = {"mean": {"pairwise": 0.70, "mean_must": 6.05}, "spread": {"pairwise": 0.03, "mean_must": 0.2}}
+    out = rank_compare.compare(base, cand)
+    assert out["metrics"]["pairwise"]["verdict"] == "clear" and abs(out["metrics"]["pairwise"]["diff"] - 0.1) < 1e-9
+    assert out["metrics"]["mean_must"]["verdict"] == "within noise"
+    assert "pairwise" in rank_compare.format_comparison(out)
+    # an older baseline without pooled metrics shows them as n/a instead of failing
+    out = rank_compare.compare(_result(0.6, 0.5), cand)
+    assert out["metrics"]["pairwise"]["verdict"] == "n/a"
+
+
 def test_compare_refuses_different_split_or_k():
     for changed in ({"split": "test"}, {"k": 3}, {"golden_rows": 61}):
         try:

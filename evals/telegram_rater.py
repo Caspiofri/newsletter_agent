@@ -8,7 +8,8 @@ Usage (from the repo root; TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env):
 State (evals/telegram_state.json) maps each sent message_id to the full report row, so a tap carries the same
 fields the labeling hub exports. Every tap is appended to evals/telegram_labels.jsonl (the raw log, never rewritten)
 and merged into the golden set through evals.import_labels.merge. Re-check taps go to evals/telegram_recheck.jsonl
-and never touch the golden set.
+and never touch the golden set. A tap on a digest pick also posts the run's picks precision to LangSmith
+(evals.human_feedback).
 """
 import argparse
 import fcntl
@@ -25,19 +26,23 @@ from pathlib import Path
 
 from config import settings  # also loads .env
 from config.settings import EVALS_DIR, OUTPUT_DIR
-from evals import telegram_select
+from evals import human_feedback, telegram_select
 from evals.import_labels import GOLDEN_RANKING_PATH, VALID_LABELS, merge
 from evals.label_hub import DEFAULT_TARGET
 from evals.telegram_api import TelegramError, make_api
-from evals.telegram_select import BUTTONS, format_message, rated_markup_text, rating_markup
+from evals.telegram_select import (BUTTONS, change_markup, collapsed_text, format_message, rated_markup_text,
+                                   rating_markup)
 
 STATE_PATH = EVALS_DIR / "telegram_state.json"
 LOG_PATH = EVALS_DIR / "telegram_labels.jsonl"
 RECHECK_PATH = EVALS_DIR / "telegram_recheck.jsonl"
-PATHS = {"golden": GOLDEN_RANKING_PATH, "log": LOG_PATH, "recheck": RECHECK_PATH}
+PATHS = {"golden": GOLDEN_RANKING_PATH, "log": LOG_PATH, "recheck": RECHECK_PATH, "out_dir": OUTPUT_DIR}
 _REPORT_RE = re.compile(r"^ranking_(.+)_(\d{8})_(\d{6})\.json$")
 POLL_TIMEOUT = 50  # seconds getUpdates waits for an update; the client timeout (60) must stay above it
-HELP = "Tap a button under an article to label it; reply to an article to add a note; /progress for the counts."
+HELP = ("Tap a button under an article to label it; reply to an article to add a note; /progress for the counts; "
+        "/more (or /more N) for more articles to rate; /more low (or /more low N) for only the lowest-scored ones.")
+MORE_DEFAULT, MORE_MAX = 5, 20
+NOTHING_LEFT = "Nothing left to rate — new articles arrive with tomorrow's run."
 
 
 def _write_atomic(path: Path, data) -> None:
@@ -94,17 +99,19 @@ def golden_row(entry: dict, label: str) -> dict:
             "content": row.get("content", ""), "ranker_picked": row.get("picked"), "ranker_score": row.get("score")}
 
 
-def _record(message_id: int, entry: dict, paths: dict, today: str) -> None:
-    """Log the entry's current label (and note) and, unless it is a re-check, merge it into the golden set."""
+def _record(message_id: int, entry: dict, paths: dict, today: str) -> list[dict] | None:
+    """Log the entry's current label (and note) and, unless it is a re-check, merge it into the golden set.
+    Returns the merged golden set (None for a re-check)."""
     line = {"at": datetime.now().isoformat(timespec="seconds"), "message_id": message_id, "url": entry["row"]["url"],
             "label": entry["label"], "note": entry.get("note", ""), "source_run": entry["source_run"]}
     if entry.get("recheck"):
         _append(paths["recheck"], line)
-        return
+        return None
     _append(paths["log"], line)
     golden = _load_golden(paths["golden"])
     merged, _, _ = merge(golden, {"run_id": entry["source_run"], "labels": [golden_row(entry, entry["label"])]}, today)
     _write_atomic(paths["golden"], merged)
+    return merged
 
 
 def _call(api, method: str, params: dict) -> None:
@@ -125,16 +132,64 @@ def _on_callback(q: dict, api, state: dict, paths: dict, today: str) -> None:
     message = q.get("message") or {}
     message_id = message.get("message_id")
     entry = state["sent"].get(str(message_id))
-    label = (q.get("data") or "").removeprefix("rate:")
+    data = q.get("data") or ""
+    label = data.removeprefix("rate:")
+    edit = lambda text, markup: _call(api, "editMessageText", {
+        "chat_id": message["chat"]["id"], "message_id": message_id, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": True, "reply_markup": markup})
+    if entry is not None and data == "edit":
+        # expand a collapsed message back to the full card; nothing is written until the next rating tap
+        _call(api, "answerCallbackQuery", {"callback_query_id": q["id"], "text": "Pick a new rating"})
+        text = rated_markup_text(entry["text"], entry["label"]) if entry.get("label") else entry["text"]
+        edit(text, rating_markup())
+        return
     if entry is None or label not in VALID_LABELS:
         _call(api, "answerCallbackQuery", {"callback_query_id": q["id"], "text": "unknown article"})
         return
     entry["label"] = label
-    _record(message_id, entry, paths, today)
+    golden = _record(message_id, entry, paths, today)
     _call(api, "answerCallbackQuery", {"callback_query_id": q["id"], "text": f"Saved: {BUTTONS[label]}"})
-    _call(api, "editMessageText", {"chat_id": message["chat"]["id"], "message_id": message_id,
-                                   "text": rated_markup_text(entry["text"], label), "parse_mode": "HTML",
-                                   "disable_web_page_preview": True, "reply_markup": rating_markup()})
+    edit(collapsed_text(entry["row"], label), change_markup())
+    if golden is not None and entry["row"].get("picked"):
+        # after Telegram has its answer: LangSmith being slow or down must never cost the tap
+        try:
+            human_feedback.post_picks_precision(golden, entry["source_run"])
+        except Exception as e:
+            print(f"[warn] human picks score: {e}")
+
+
+def _more_args(text: str) -> tuple[int, bool]:
+    # "/more", "/more 3", "/more@bot 3", "/more low 3", "/more 3 low": a missing or non-number N is the
+    # default, any number is clamped; "low" anywhere asks for low-scored drops only
+    args = text.split()[1:]
+    low = any(a.lower() == "low" for a in args)
+    nums = [a for a in args if a.lower() != "low"]
+    try:
+        n = int(nums[0]) if nums else MORE_DEFAULT
+    except ValueError:
+        n = MORE_DEFAULT
+    return max(1, min(MORE_MAX, n)), low
+
+
+def _send_more(text: str, api, chat: str, state: dict, paths: dict) -> None:
+    """/more: N extra articles from all reports, newest first (/more low: lowest-scored drops first),
+    skipping labeled and already-sent URLs."""
+    skip = {g["url"] for g in _load_golden(paths["golden"]) if g.get("url")}
+    skip |= {e["row"]["url"] for e in state["sent"].values()}
+    reports = [_read_report(p) for p in all_reports(paths["out_dir"])]
+    n, low = _more_args(text)
+    if low:
+        chosen = telegram_select.select_low(reports, skip, n)
+    else:
+        chosen = telegram_select.select_more(reports, skip, settings.RANK_MIN_SCORE, n)
+    if not chosen:
+        _call(api, "sendMessage", {"chat_id": chat, "text": NOTHING_LEFT})
+        return
+    counts = " · ".join(f"{s} {n}" for s in telegram_select.MORE_SLOTS
+                        if (n := sum(name == s for name, _, _ in chosen)))
+    _call(api, "sendMessage", {"chat_id": chat, "text": f"Sending {len(chosen)} more ({counts})"})
+    for _, row, run in chosen:
+        _send_one(api, chat, state, row, run, recheck=False)  # a failed article is printed and skipped
 
 
 def _on_message(m: dict, api, chat: str, state: dict, paths: dict, today: str) -> None:
@@ -152,6 +207,8 @@ def _on_message(m: dict, api, chat: str, state: dict, paths: dict, today: str) -
         reply("Note saved", reply_to_message_id=m["message_id"])
     elif text.startswith("/progress"):
         reply(_progress(paths["golden"]))
+    elif text.startswith("/more"):
+        _send_more(text, api, chat, state, paths)
     else:
         reply(HELP)
 
@@ -188,6 +245,25 @@ def todays_reports(out_dir: Path, today: str) -> list[Path]:
     return [p for _, p in latest.values()]
 
 
+def all_reports(out_dir: Path) -> list[Path]:
+    """Every ranking report in out_dir, newest first (exported label files are not reports)."""
+    found = []
+    for p in out_dir.glob("ranking_*.json"):
+        m = _REPORT_RE.match(p.name)
+        if m and not m.group(1).startswith("labels_"):
+            found.append((m.group(2) + m.group(3), p))
+    return [p for _, p in sorted(found, reverse=True)]
+
+
+def _read_report(path: Path) -> tuple[str, list[dict]]:
+    """(run_id, items) of one report file; the run id falls back to the timestamp in the file name."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    items = data if isinstance(data, list) else data.get("items", [])
+    m = _REPORT_RE.match(path.name)
+    run = (data.get("run_id") if isinstance(data, dict) else None) or (f"{m.group(2)}_{m.group(3)}" if m else "")
+    return run, items
+
+
 def _send_one(api, chat_id: str, state: dict, row: dict, source_run: str, recheck: bool) -> bool:
     text, markup = format_message(row, recheck=recheck)
     try:
@@ -216,10 +292,7 @@ def send(report_paths: list[Path], api, chat_id: str, state_path: Path, golden_p
     with _locked(state_path):
         state = load_state(state_path)
         for path in report_paths:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            items = data if isinstance(data, list) else data.get("items", [])
-            m = _REPORT_RE.match(path.name)
-            run = (data.get("run_id") if isinstance(data, dict) else None) or (f"{m.group(2)}_{m.group(3)}" if m else "")
+            run, items = _read_report(path)
             already = {e["row"]["url"] for e in state["sent"].values() if e["source_run"] == run}
             for row in telegram_select.select(items, skip | already, settings.RANK_MIN_SCORE, settings.TELEGRAM_EXTRA):
                 skip.add(row["url"])  # the same article in two profiles' reports is asked once
